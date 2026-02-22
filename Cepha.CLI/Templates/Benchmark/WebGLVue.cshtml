@@ -1,0 +1,168 @@
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+.gl-canvas{width:100%;height:520px;background:#000;border-radius:8px;border:1px solid #333;display:block}
+.gl-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.gl-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.gl-ctrl input[type=range]{width:110px;accent-color:#667eea}
+.gl-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.gl-metric{text-align:center}.gl-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.gl-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+.vue-banner{background:linear-gradient(135deg,#42b883,#35495e);color:#fff;padding:6px 16px;border-radius:8px;margin-bottom:10px;font-weight:bold;font-size:.85rem;display:flex;align-items:center;gap:8px}
+</style>
+<div id="bench-root"></div>
+
+<script>
+(function(){
+const{createApp,ref,computed,onMounted,onUnmounted,watch}=Vue;
+const _bench=window.__cephaBench;
+const isAuto=_bench&&_bench.active;
+const duration=(_bench&&_bench.duration)||8;
+
+createApp({
+    setup(){
+        const ctrlParts=ref(50000);
+        const ctrlSize=ref(2);
+        const ctrlTurb=ref(40);
+        const running=ref(false);
+        const currentFps=ref(0);
+        const vertCount=ref('0');
+        const drawCallCount=ref(0);
+        const gpuTime=ref('0');
+        const frameTimeVal=ref('0');
+        let gl,program,timeLoc,sizeLoc,posBuffer,positions,velocities,particleCount=50000;
+        let animId,fpsFrames=0,lastFpsTime=0,drawCalls=0;
+
+        const fpsColor=computed(()=>currentFps.value>=50?'#3fb950':currentFps.value>=30?'#d29922':'#f85149');
+
+        const VS=`attribute vec2 aPos;uniform float uTime;uniform float uSize;varying vec3 vColor;
+        void main(){
+            float angle=uTime*.5+aPos.x*3.0;
+            vec2 p=aPos+vec2(sin(angle+aPos.y*10.0),cos(angle+aPos.x*10.0))*.15;
+            gl_Position=vec4(p,0,1);gl_PointSize=uSize;
+            vColor=vec3(.4+sin(aPos.x*5.0+uTime)*.3,.5+cos(aPos.y*7.0+uTime)*.3,.9);
+        }`;
+        const FS=`precision mediump float;varying vec3 vColor;
+        void main(){
+            float d=length(gl_PointCoord-.5);
+            if(d>.5)discard;
+            float alpha=1.0-d*2.0;
+            gl_FragColor=vec4(vColor*alpha,alpha*.8);
+        }`;
+
+        function resize(){
+            const canvas=document.getElementById('glCanvasVue');
+            if(canvas){canvas.width=canvas.clientWidth;canvas.height=canvas.clientHeight;if(gl)gl.viewport(0,0,canvas.width,canvas.height);}
+        }
+
+        function initGL(){
+            const canvas=document.getElementById('glCanvasVue');
+            gl=canvas.getContext('webgl',{antialias:false,alpha:false});
+            if(!gl)return false;
+            gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+            function compile(type,src){
+                const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
+                if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){console.error(gl.getShaderInfoLog(s));return null;}return s;
+            }
+            const vs=compile(gl.VERTEX_SHADER,VS),fs=compile(gl.FRAGMENT_SHADER,FS);
+            program=gl.createProgram();gl.attachShader(program,vs);gl.attachShader(program,fs);gl.linkProgram(program);
+            gl.useProgram(program);
+            timeLoc=gl.getUniformLocation(program,'uTime');
+            sizeLoc=gl.getUniformLocation(program,'uSize');
+            posBuffer=gl.createBuffer();
+            return true;
+        }
+
+        function initParticles(n){
+            particleCount=n;
+            positions=new Float32Array(n*2);velocities=new Float32Array(n*2);
+            for(let i=0;i<n;i++){
+                const angle=Math.random()*Math.PI*2,r=Math.random()*.8;
+                positions[i*2]=Math.cos(angle)*r;positions[i*2+1]=Math.sin(angle)*r;
+                velocities[i*2]=(Math.random()-.5)*.01;velocities[i*2+1]=(Math.random()-.5)*.01;
+            }
+            gl.bindBuffer(gl.ARRAY_BUFFER,posBuffer);gl.bufferData(gl.ARRAY_BUFFER,positions,gl.DYNAMIC_DRAW);
+            const aPos=gl.getAttribLocation(program,'aPos');gl.enableVertexAttribArray(aPos);gl.vertexAttribPointer(aPos,2,gl.FLOAT,false,0,0);
+        }
+
+        function tick(time){
+            if(!running.value)return;
+            const t0=performance.now();
+            const turb=ctrlTurb.value/1000;
+            const pSize=ctrlSize.value;
+            const t=time*.001;
+
+            for(let i=0;i<particleCount;i++){
+                const ix=i*2,iy=i*2+1;
+                velocities[ix]+=(Math.random()-.5)*turb;velocities[iy]+=(Math.random()-.5)*turb;
+                velocities[ix]-=positions[ix]*.001;velocities[iy]-=positions[iy]*.001;
+                positions[ix]+=velocities[ix];positions[iy]+=velocities[iy];
+                velocities[ix]*=.999;velocities[iy]*=.999;
+                if(Math.abs(positions[ix])>1){positions[ix]*=.9;velocities[ix]*=-.5;}
+                if(Math.abs(positions[iy])>1){positions[iy]*=.9;velocities[iy]*=-.5;}
+            }
+
+            gl.bindBuffer(gl.ARRAY_BUFFER,posBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,0,positions);
+            gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.uniform1f(timeLoc,t);gl.uniform1f(sizeLoc,pSize);
+            gl.drawArrays(gl.POINTS,0,particleCount);
+            drawCalls++;
+
+            const now=performance.now();fpsFrames++;
+            if(now-lastFpsTime>=500){
+                currentFps.value=Math.round(fpsFrames*1000/(now-lastFpsTime));fpsFrames=0;lastFpsTime=now;
+                drawCallCount.value=drawCalls;drawCalls=0;
+            }
+            vertCount.value=particleCount.toLocaleString();
+            frameTimeVal.value=(now-t0).toFixed(1);
+            gpuTime.value=(now-t0).toFixed(1);
+
+            animId=requestAnimationFrame(tick);
+        }
+
+        function start(){
+            if(!gl&&!initGL())return;
+            const n=ctrlParts.value;
+            initParticles(n);running.value=true;fpsFrames=0;lastFpsTime=performance.now();
+            animId=requestAnimationFrame(tick);
+        }
+        function stop(){
+            running.value=false;if(animId)cancelAnimationFrame(animId);
+            if(isAuto&&_bench){
+                _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps.value*1.6));
+                history.pushState({},'','/benchmark');
+                dispatchEvent(new PopStateEvent('popstate'));
+            }
+        }
+
+        watch(ctrlParts,n=>{if(running.value&&gl)initParticles(n);});
+
+        onMounted(()=>{
+            resize();window.addEventListener('resize',resize);
+            if(isAuto){start();setTimeout(stop,duration*1000);}
+        });
+        onUnmounted(()=>{window.removeEventListener('resize',resize);});
+
+        return{ctrlParts,ctrlSize,ctrlTurb,running,currentFps,vertCount,drawCallCount,
+            gpuTime,frameTimeVal,fpsColor,start,stop};
+    },
+    template:`
+<div style="max-width:1200px;margin:0 auto;">
+    <div class="vue-banner">🟢 Vue 3 <span style="font-weight:normal;font-size:.75rem;">— Composition API + Reactive Proxy</span></div>
+    <h2 style="margin:8px 0;font-size:1.2rem;">💎 WebGL Forge — GPU particle storm</h2>
+    <div class="gl-ctrl">
+        <div><label>Particles</label><br><input type="range" v-model.number="ctrlParts" min="1000" max="200000" step="1000"><span style="color:#667eea;font-weight:bold;margin-left:4px">{{ctrlParts}}</span></div>
+        <div><label>Point Size</label><br><input type="range" v-model.number="ctrlSize" min="1" max="8"><span style="color:#667eea;font-weight:bold;margin-left:4px">{{ctrlSize}}</span></div>
+        <div><label>Turbulence</label><br><input type="range" v-model.number="ctrlTurb" min="0" max="100"><span style="color:#667eea;font-weight:bold;margin-left:4px">{{ctrlTurb}}</span></div>
+        <button style="padding:6px 16px;border:none;border-radius:6px;background:#28a745;color:#fff;font-weight:bold;cursor:pointer" @click="start" :disabled="running">▶ START</button>
+        <button style="padding:6px 16px;border:none;border-radius:6px;background:#dc3545;color:#fff;font-weight:bold;cursor:pointer" @click="stop" :disabled="!running">⏹ STOP</button>
+    </div>
+    <div class="gl-metrics">
+        <div class="gl-metric"><div class="num" :style="{color:fpsColor}">{{currentFps}}</div><div class="lbl">FPS</div></div>
+        <div class="gl-metric"><div class="num" style="color:#667eea">{{vertCount}}</div><div class="lbl">Vertices</div></div>
+        <div class="gl-metric"><div class="num" style="color:#f0883e">{{drawCallCount}}</div><div class="lbl">Draw Calls</div></div>
+        <div class="gl-metric"><div class="num" style="color:#d2a8ff">{{gpuTime}}</div><div class="lbl">GPU ms</div></div>
+        <div class="gl-metric"><div class="num" style="color:#d29922">{{frameTimeVal}}</div><div class="lbl">Frame ms</div></div>
+    </div>
+    <canvas id="glCanvasVue" class="gl-canvas"></canvas>
+</div>`
+}).mount('#bench-root');
+})();
+</script>

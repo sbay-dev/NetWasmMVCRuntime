@@ -1,0 +1,205 @@
+<div id="bench-root"></div>
+
+<script>
+(function(){
+    const _bench=window.__cephaBench;
+    const isAuto=_bench&&_bench.active;
+    const duration=(_bench&&_bench.duration)||8;
+    const colors=['#f0883e','#f85149','#3fb950','#667eea','#d2a8ff','#79c0ff','#e0e0e0','#d29922','#ff6b9d','#00d4aa'];
+    let running=false,animId=null,targets=[],hits=0,misses=0,totalClicks=0;
+    let latencies=[],eventsThisSec=0,lastEvTime=performance.now();
+    let frames=0,lastFpsTime=performance.now(),currentFps=60;
+
+    // ── Build entire UI from JavaScript (Svelte-compiled style) ──
+    const app=document.getElementById('bench-root');
+
+    const style=document.createElement('style');
+    style.textContent=`
+.storm-arena{position:relative;width:100%;height:500px;overflow:hidden;background:#0a0a1a;border-radius:8px;border:1px solid #333;cursor:crosshair}
+.storm-target{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;cursor:pointer;user-select:none;will-change:transform;transition:none}
+.storm-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.storm-metric{text-align:center}.storm-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.storm-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+.storm-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.storm-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.storm-ctrl input[type=range]{width:120px;accent-color:#f0883e}
+.storm-btn{padding:6px 16px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:.8rem}`;
+    document.head.appendChild(style);
+
+    const root=document.createElement('div');
+    root.style.cssText='max-width:1200px;margin:0 auto;';
+
+    // Banner
+    const banner=document.createElement('div');
+    banner.style.cssText='background:#f0883e;color:#fff;padding:6px 14px;border-radius:6px;margin-bottom:8px;font-weight:bold;font-size:.85rem;';
+    banner.textContent='\u{1F7E0} Vanilla JS (Svelte-compiled)';
+    root.appendChild(banner);
+
+    // Title
+    const h2=document.createElement('h2');
+    h2.style.cssText='margin:8px 0;font-size:1.2rem;';
+    h2.textContent='\u{1F3AF} Click Storm — Hit the moving targets';
+    root.appendChild(h2);
+
+    // Controls
+    const ctrl=document.createElement('div');
+    ctrl.className='storm-ctrl';
+    function makeSlider(label,id,min,max,val){
+        const wrap=document.createElement('div');
+        const lbl=document.createElement('label');lbl.textContent=label;
+        wrap.appendChild(lbl);wrap.appendChild(document.createElement('br'));
+        const inp=document.createElement('input');
+        inp.type='range';inp.id=id;inp.min=min;inp.max=max;inp.value=val;
+        const sp=document.createElement('span');
+        sp.id=id.replace('ctrl','val');sp.style.cssText='color:#f0883e;font-weight:bold;margin-left:4px';sp.textContent=val;
+        inp.oninput=function(){sp.textContent=this.value;};
+        wrap.appendChild(inp);wrap.appendChild(sp);
+        return wrap;
+    }
+    ctrl.appendChild(makeSlider('Targets','ctrlTargets',20,500,50));
+    ctrl.appendChild(makeSlider('Speed','ctrlMoveSpeed',1,200,60));
+    ctrl.appendChild(makeSlider('Spawn on Click','ctrlSpawn',0,10,3));
+
+    const btnGo=document.createElement('button');
+    btnGo.className='storm-btn';btnGo.id='btnGo';btnGo.style.cssText='background:#28a745;color:#fff;';btnGo.textContent='\u25B6 START';
+    const btnHalt=document.createElement('button');
+    btnHalt.className='storm-btn';btnHalt.id='btnHalt';btnHalt.style.cssText='background:#dc3545;color:#fff;';btnHalt.textContent='\u23F9 STOP';btnHalt.disabled=true;
+    ctrl.appendChild(btnGo);ctrl.appendChild(btnHalt);
+    root.appendChild(ctrl);
+
+    // Metrics
+    const metricsBar=document.createElement('div');
+    metricsBar.className='storm-metrics';
+    const metricsDef=[
+        {id:'mFps',color:'#3fb950',label:'FPS',init:'0'},
+        {id:'mHits',color:'#f0883e',label:'Hits',init:'0'},
+        {id:'mMisses',color:'#f85149',label:'Misses',init:'0'},
+        {id:'mLatency',color:'#79c0ff',label:'Avg Latency ms',init:'0'},
+        {id:'mEvents',color:'#d2a8ff',label:'Events/sec',init:'0'},
+        {id:'mActive',color:'#667eea',label:'Active Targets',init:'0'},
+        {id:'mTotal',color:'#e0e0e0',label:'Total Clicks',init:'0'},
+        {id:'mAccuracy',color:'#3fb950',label:'Accuracy',init:'0%'}
+    ];
+    for(const m of metricsDef){
+        const d=document.createElement('div');d.className='storm-metric';
+        const n=document.createElement('div');n.className='num';n.id=m.id;n.style.color=m.color;n.textContent=m.init;
+        const l=document.createElement('div');l.className='lbl';l.textContent=m.label;
+        d.appendChild(n);d.appendChild(l);metricsBar.appendChild(d);
+    }
+    root.appendChild(metricsBar);
+
+    // Arena
+    const arena=document.createElement('div');
+    arena.className='storm-arena';arena.id='arena';
+    root.appendChild(arena);
+
+    app.appendChild(root);
+
+    // ── Game logic (identical to original) ──
+    function getCount(){return+document.getElementById('ctrlTargets').value}
+    function getSpeed(){return+document.getElementById('ctrlMoveSpeed').value}
+    function getSpawn(){return+document.getElementById('ctrlSpawn').value}
+
+    function createTarget(x,y,sz){
+        sz=sz||Math.random()*30+14;
+        const el=document.createElement('div');
+        el.className='storm-target';
+        el.style.cssText=`width:${sz}px;height:${sz}px;background:${colors[Math.floor(Math.random()*colors.length)]};font-size:${Math.max(8,sz*.35)}px;color:#fff;`;
+        const t={el,x:x??Math.random()*(arena.clientWidth-sz),y:y??Math.random()*(arena.clientHeight-sz),vx:(Math.random()-.5)*4,vy:(Math.random()-.5)*4,sz,born:performance.now()};
+        el.style.transform=`translate(${t.x}px,${t.y}px)`;
+        el.textContent='\u25CF';
+        el.addEventListener('pointerdown',e=>{
+            e.preventDefault();e.stopPropagation();
+            const lat=performance.now()-t.lastRender;
+            latencies.push(lat);hits++;totalClicks++;eventsThisSec++;
+            const spawn=getSpawn();
+            for(let i=0;i<spawn;i++)createTarget(t.x+Math.random()*40-20,t.y+Math.random()*40-20,t.sz*.7);
+            el.style.transform=`translate(${t.x}px,${t.y}px) scale(1.5)`;
+            el.style.opacity='0';
+            setTimeout(()=>{if(el.parentNode)el.parentNode.removeChild(el);},150);
+            t.dead=true;
+        });
+        arena.appendChild(el);
+        targets.push(t);
+        return t;
+    }
+
+    arena.addEventListener('pointerdown',e=>{
+        if(e.target===arena){misses++;totalClicks++;eventsThisSec++;}
+    });
+
+    function init(){
+        arena.innerHTML='';targets=[];hits=0;misses=0;totalClicks=0;latencies=[];
+        const c=getCount();
+        for(let i=0;i<c;i++)createTarget();
+    }
+
+    function tick(now){
+        if(!running)return;
+        const spd=getSpeed()/60;
+        const W=arena.clientWidth,H=arena.clientHeight;
+        targets=targets.filter(t=>!t.dead);
+
+        for(const t of targets){
+            t.x+=t.vx*spd;t.y+=t.vy*spd;
+            if(t.x<0||t.x>W-t.sz)t.vx*=-1;
+            if(t.y<0||t.y>H-t.sz)t.vy*=-1;
+            t.x=Math.max(0,Math.min(W-t.sz,t.x));
+            t.y=Math.max(0,Math.min(H-t.sz,t.y));
+            t.el.style.transform=`translate(${t.x}px,${t.y}px)`;
+            t.lastRender=now;
+            if(Math.random()<.02){t.vx+=(Math.random()-.5)*2;t.vy+=(Math.random()-.5)*2;}
+        }
+
+        while(targets.length<getCount())createTarget();
+
+        frames++;
+        if(now-lastFpsTime>=500){
+            currentFps=Math.round(frames*1000/(now-lastFpsTime));
+            frames=0;lastFpsTime=now;
+            document.getElementById('mFps').textContent=currentFps;
+            document.getElementById('mFps').style.color=currentFps>=50?'#3fb950':currentFps>=30?'#d29922':'#f85149';
+        }
+        if(now-lastEvTime>=1000){
+            document.getElementById('mEvents').textContent=eventsThisSec;
+            eventsThisSec=0;lastEvTime=now;
+        }
+        document.getElementById('mHits').textContent=hits;
+        document.getElementById('mMisses').textContent=misses;
+        document.getElementById('mActive').textContent=targets.length;
+        document.getElementById('mTotal').textContent=totalClicks;
+        document.getElementById('mLatency').textContent=latencies.length?Math.round(latencies.reduce((a,b)=>a+b,0)/latencies.length):'0';
+        document.getElementById('mAccuracy').textContent=totalClicks>0?Math.round(hits/totalClicks*100)+'%':'0%';
+
+        animId=requestAnimationFrame(tick);
+    }
+
+    function start(){running=true;init();frames=0;lastFpsTime=performance.now();animId=requestAnimationFrame(tick);
+        btnGo.disabled=true;btnHalt.disabled=false;}
+    function stop(){running=false;if(animId)cancelAnimationFrame(animId);
+        btnGo.disabled=false;btnHalt.disabled=true;
+        if(isAuto&&_bench){
+            const score=Math.min(100,Math.round(currentFps*1.5+(latencies.length?Math.max(0,100-latencies.reduce((a,b)=>a+b,0)/latencies.length):0)));
+            _bench.scores[_bench.currentTest]=score;
+            history.pushState({},'','/benchmark');
+            dispatchEvent(new PopStateEvent('popstate'));
+        }
+    }
+
+    btnGo.onclick=start;
+    btnHalt.onclick=stop;
+
+    if(isAuto){
+        start();
+        const clickIv=setInterval(()=>{
+            if(!running)return;
+            for(let i=0;i<5;i++){
+                const alive=targets.filter(t=>!t.dead);
+                if(alive.length){
+                    const t=alive[Math.floor(Math.random()*alive.length)];
+                    t.el.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));
+                }
+            }
+        },50);
+        setTimeout(()=>{clearInterval(clickIv);stop();},duration*1000);
+    }
+})();
+</script>

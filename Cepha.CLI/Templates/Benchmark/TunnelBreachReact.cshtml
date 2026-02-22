@@ -1,0 +1,273 @@
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<style>
+.tunnel-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.tunnel-cell{background:#0a0a1a;border:1px solid #333;border-radius:8px;overflow:hidden;position:relative;min-height:240px}
+.tunnel-cell canvas{width:100%;height:100%;display:block}
+.tunnel-cell-label{position:absolute;top:6px;left:8px;font-size:.7rem;font-weight:bold;padding:2px 8px;background:rgba(0,0,0,.7);border-radius:4px;z-index:1}
+.tunnel-cell-fps{position:absolute;top:6px;right:8px;font-size:.8rem;font-weight:bold;font-family:monospace;z-index:1}
+.tunnel-hud{padding:12px;background:linear-gradient(135deg,#0d1117,#1a1a2e);border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.tunnel-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px}
+.tunnel-metric{text-align:center}.tunnel-metric .num{font-size:1.3rem;font-weight:bold;font-family:monospace}.tunnel-metric .lbl{font-size:.55rem;color:#8b949e;text-transform:uppercase}
+.tunnel-bar{height:20px;background:#30363d;border-radius:10px;overflow:hidden;margin-top:8px}
+.tunnel-bar-fill{height:100%;transition:width .3s ease;border-radius:10px}
+.tunnel-target{position:absolute;border-radius:50%;will-change:transform}
+.breach-overlay{display:none;position:fixed;inset:0;background:rgba(248,81,73,.15);z-index:9998;pointer-events:none}
+.breach-overlay.active{display:block;animation:breachPulse 1s ease infinite}
+@keyframes breachPulse{0%,100%{opacity:.15}50%{opacity:.3}}
+</style>
+<div id="bench-root"></div>
+
+<script>
+(function(){
+const h = React.createElement;
+const {useState, useEffect, useRef, useCallback} = React;
+const _bench = window.__cephaBench;
+const isAuto = _bench && _bench.active;
+const duration = (_bench && _bench.duration) || 8;
+const physColors=['#667eea','#f0883e','#3fb950','#f85149','#d2a8ff','#79c0ff'];
+const clickColors=['#f0883e','#f85149','#3fb950','#667eea','#d2a8ff','#ff6b9d'];
+
+function App(){
+    const [running, setRunning] = useState(false);
+    const [metrics, setMetrics] = useState({fps:0,systems:0,threat:'Low',breach:0});
+    const [clickTargets, setClickTargets] = useState([]);
+    const [breachActive, setBreachActive] = useState(false);
+    const [logLines, setLogLines] = useState([]);
+    const physRef = useRef(null);
+    const glRef = useRef(null);
+    const clickRef = useRef(null);
+    const stateRef = useRef({running:false,aborted:false,fps:60,frames:0,lastFpsTime:0,startTime:0,
+        bodies:[],gl:null,glProg:null,glBuf:null,glPos:null,glVel:null,glCount:30000,
+        clickTgts:[],clickCount:0,dataOps:0,cryptoLayers:0});
+    const animRef = useRef(null);
+    let nextClickId=0;
+
+    // Physics init
+    const initPhysics = useCallback(()=>{
+        const c=physRef.current;if(!c)return;
+        c.width=c.clientWidth;c.height=c.clientHeight;
+        const s=stateRef.current;s.bodies=[];
+        for(let i=0;i<800;i++){
+            s.bodies.push({x:Math.random()*c.width,y:Math.random()*c.height,vx:(Math.random()-.5)*3,vy:(Math.random()-.5)*3,
+                mass:Math.random()*2+.5,r:Math.random()*2+1,color:physColors[i%physColors.length]});
+        }
+    },[]);
+
+    const tickPhysics = useCallback(()=>{
+        const c=physRef.current;if(!c)return;
+        const ctx=c.getContext('2d');
+        const s=stateRef.current,W=c.width,H=c.height,n=s.bodies.length;
+        for(let i=0;i<n;i++){
+            const a=s.bodies[i];
+            for(let j=i+1;j<Math.min(i+50,n);j++){
+                const b=s.bodies[j],dx=b.x-a.x,dy=b.y-a.y,d2=dx*dx+dy*dy+1;
+                const F=.0003*a.mass*b.mass/d2,dist=Math.sqrt(d2),fx=F*dx/dist,fy=F*dy/dist;
+                a.vx+=fx/a.mass;a.vy+=fy/a.mass;b.vx-=fx/b.mass;b.vy-=fy/b.mass;
+            }
+            a.x+=a.vx;a.y+=a.vy;
+            if(a.x<0||a.x>W)a.vx*=-.8;if(a.y<0||a.y>H)a.vy*=-.8;
+            a.x=Math.max(0,Math.min(W,a.x));a.y=Math.max(0,Math.min(H,a.y));
+        }
+        ctx.fillStyle='rgba(10,10,26,.3)';ctx.fillRect(0,0,W,H);
+        for(const b of s.bodies){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fillStyle=b.color;ctx.fill();}
+    },[]);
+
+    // WebGL init
+    const initGL = useCallback(()=>{
+        const c=glRef.current;if(!c)return;
+        c.width=c.clientWidth;c.height=c.clientHeight;
+        const gl=c.getContext('webgl',{antialias:false,alpha:false});if(!gl)return;
+        gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+        const vs=`attribute vec2 a;uniform float t;varying vec3 c;void main(){float a2=t*.5+a.x*3.;vec2 p=a+vec2(sin(a2+a.y*10.),cos(a2+a.x*10.))*.1;gl_Position=vec4(p,0,1);gl_PointSize=2.;c=vec3(.4+sin(a.x*5.+t)*.3,.5+cos(a.y*7.+t)*.3,.9);}`;
+        const fs=`precision mediump float;varying vec3 c;void main(){float d=length(gl_PointCoord-.5);if(d>.5)discard;gl_FragColor=vec4(c*(1.-d*2.),(1.-d*2.)*.7);}`;
+        function comp(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s;}
+        const prog=gl.createProgram();gl.attachShader(prog,comp(gl.VERTEX_SHADER,vs));gl.attachShader(prog,comp(gl.FRAGMENT_SHADER,fs));gl.linkProgram(prog);gl.useProgram(prog);
+        const s=stateRef.current;s.gl=gl;s.glProg=prog;s.glBuf=gl.createBuffer();
+        const n=s.glCount;s.glPos=new Float32Array(n*2);s.glVel=new Float32Array(n*2);
+        for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,r=Math.random()*.8;
+            s.glPos[i*2]=Math.cos(a)*r;s.glPos[i*2+1]=Math.sin(a)*r;
+            s.glVel[i*2]=(Math.random()-.5)*.01;s.glVel[i*2+1]=(Math.random()-.5)*.01;}
+        gl.bindBuffer(gl.ARRAY_BUFFER,s.glBuf);gl.bufferData(gl.ARRAY_BUFFER,s.glPos,gl.DYNAMIC_DRAW);
+        const aLoc=gl.getAttribLocation(prog,'a');gl.enableVertexAttribArray(aLoc);gl.vertexAttribPointer(aLoc,2,gl.FLOAT,false,0,0);
+    },[]);
+
+    const tickGL = useCallback((time)=>{
+        const s=stateRef.current,gl=s.gl;if(!gl)return;
+        const c=glRef.current;if(!c)return;
+        gl.viewport(0,0,c.width,c.height);
+        const n=s.glCount;
+        for(let i=0;i<n;i++){
+            const ix=i*2;s.glVel[ix]+=(Math.random()-.5)*.003;s.glVel[ix+1]+=(Math.random()-.5)*.003;
+            s.glVel[ix]-=s.glPos[ix]*.001;s.glVel[ix+1]-=s.glPos[ix+1]*.001;
+            s.glPos[ix]+=s.glVel[ix];s.glPos[ix+1]+=s.glVel[ix+1];
+            s.glVel[ix]*=.999;s.glVel[ix+1]*=.999;
+            if(Math.abs(s.glPos[ix])>1){s.glPos[ix]*=.9;s.glVel[ix]*=-.5;}
+            if(Math.abs(s.glPos[ix+1])>1){s.glPos[ix+1]*=.9;s.glVel[ix+1]*=-.5;}
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER,s.glBuf);gl.bufferSubData(gl.ARRAY_BUFFER,0,s.glPos);
+        gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.uniform1f(gl.getUniformLocation(s.glProg,'t'),time*.001);
+        gl.drawArrays(gl.POINTS,0,n);
+    },[]);
+
+    // Click targets
+    const initClicks = useCallback(()=>{
+        const tgts=[];
+        const arena=clickRef.current;
+        const W=arena?arena.clientWidth:300,H=arena?arena.clientHeight:240;
+        for(let i=0;i<60;i++){
+            const sz=Math.random()*20+10;
+            tgts.push({id:nextClickId++,x:Math.random()*(W-sz)+sz/2,y:Math.random()*(H-sz-30)+30,
+                vx:(Math.random()-.5)*3,vy:(Math.random()-.5)*3,sz,color:clickColors[Math.floor(Math.random()*clickColors.length)]});
+        }
+        stateRef.current.clickTgts=tgts;
+        setClickTargets([...tgts]);
+    },[]);
+
+    const tickClicks = useCallback(()=>{
+        const arena=clickRef.current;if(!arena)return;
+        const W=arena.clientWidth,H=arena.clientHeight,tgts=stateRef.current.clickTgts;
+        for(const t of tgts){
+            t.x+=t.vx*2;t.y+=t.vy*2;
+            if(t.x<0||t.x>W-t.sz)t.vx*=-1;if(t.y<30||t.y>H-t.sz)t.vy*=-1;
+            t.x=Math.max(0,Math.min(W-t.sz,t.x));t.y=Math.max(30,Math.min(H-t.sz,t.y));
+            if(Math.random()<.01){t.vx+=(Math.random()-.5)*2;t.vy+=(Math.random()-.5)*2;}
+        }
+        if(Math.random()<.3&&tgts.length>0){
+            stateRef.current.clickCount++;
+            if(stateRef.current.clickCount%10===0){
+                const sz=Math.random()*20+10;
+                tgts.push({id:nextClickId++,x:Math.random()*(W-sz),y:Math.random()*(H-sz-30)+30,
+                    vx:(Math.random()-.5)*3,vy:(Math.random()-.5)*3,sz,color:clickColors[Math.floor(Math.random()*clickColors.length)]});
+            }
+        }
+        setClickTargets([...tgts]);
+    },[]);
+
+    // Crypto + Data background
+    const addLogLine = useCallback((msg)=>{setLogLines(prev=>[...prev.slice(-30),msg]);},[]);
+
+    const runCryptoData = useCallback(async()=>{
+        const s=stateRef.current;
+        addLogLine('🗄️ Generating 100K records...');
+        const data=[];for(let i=0;i<100000;i++)data.push({id:i,v:Math.random(),s:'x'.repeat(20)});
+        s.dataOps++;addLogLine('✅ Generated. Sorting...');
+        data.sort((a,b)=>a.v-b.v);s.dataOps++;addLogLine('✅ Sorted.');
+        await new Promise(r=>requestAnimationFrame(r));
+
+        addLogLine('🔐 30-layer Matryoshka...');
+        const payload=new Uint8Array(32*1024);crypto.getRandomValues(payload);
+        let encrypted=payload;const keys=[];
+        for(let L=0;L<30&&!s.aborted;L++){
+            const key=await crypto.subtle.generateKey({name:'AES-GCM',length:256},true,['encrypt','decrypt']);
+            const iv=crypto.getRandomValues(new Uint8Array(12));
+            encrypted=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,encrypted));
+            keys.push({key,iv});s.cryptoLayers=L+1;
+            if(L%5===0)addLogLine('  🔒 Layer '+(L+1)+'/30');
+        }
+        if(!s.aborted){
+            addLogLine('✅ Decrypting...');
+            let dec=encrypted;
+            for(let L=keys.length-1;L>=0;L--){const{key,iv}=keys[L];dec=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv},key,dec));}
+            s.dataOps++;addLogLine('✅ Verified!');
+        }
+        if(s.running&&!s.aborted){addLogLine('🔄 Repeating...');await runCryptoData();}
+    },[addLogLine]);
+
+    // Main loop
+    const mainLoop = useCallback((time)=>{
+        const s=stateRef.current;if(!s.running)return;
+        s.frames++;const now=performance.now();
+        if(now-s.lastFpsTime>=500){
+            s.fps=Math.round(s.frames*1000/(now-s.lastFpsTime));s.frames=0;s.lastFpsTime=now;
+            const load=Math.min(100,Math.round((1-s.fps/60)*100));
+            const threat=s.fps>=50?'Low':s.fps>=30?'Medium':s.fps>=10?'High':'BREACH';
+            const breach=Math.min(100,Math.max(0,Math.round((1-s.fps/60)*150)));
+            setMetrics({fps:s.fps,systems:4,threat,breach});
+            setBreachActive(s.fps<10);
+        }
+        tickPhysics();tickGL(time);tickClicks();
+        requestAnimationFrame(mainLoop);
+    },[tickPhysics,tickGL,tickClicks]);
+
+    const startBreach = useCallback(()=>{
+        const s=stateRef.current;if(s.running)return;
+        s.running=true;s.aborted=false;s.startTime=performance.now();
+        s.frames=0;s.lastFpsTime=performance.now();s.dataOps=0;s.cryptoLayers=0;s.clickCount=0;
+        setRunning(true);setLogLines([]);
+        initPhysics();initGL();initClicks();
+        requestAnimationFrame(mainLoop);
+        runCryptoData();
+    },[initPhysics,initGL,initClicks,mainLoop,runCryptoData]);
+
+    const stopBreach = useCallback(()=>{
+        const s=stateRef.current;s.running=false;s.aborted=true;
+        setRunning(false);setBreachActive(false);
+        const score=Math.min(100,Math.round(s.fps*2));
+        if(_bench&&_bench.active){
+            if(_bench.battleMode&&_bench.recordScore)_bench.recordScore('tunnel',score);
+            else _bench.scores['tunnel']=score;
+            _bench.next();
+        }
+    },[]);
+
+    useEffect(()=>{
+        if(isAuto){setTimeout(()=>{startBreach();setTimeout(stopBreach,duration*1000);},50);}
+    },[]);
+
+    const fpsColor=metrics.fps>=50?'#3fb950':metrics.fps>=30?'#d29922':'#f85149';
+    const barW=Math.min(100,Math.max(0,metrics.breach))+'%';
+    const barColor=metrics.fps>=50?'#3fb950':metrics.fps>=30?'#d29922':metrics.fps>=10?'#f85149':'#ff0000';
+
+    return h('div',{style:{maxWidth:'1400px',margin:'0 auto'}},
+        h('div',{style:{background:'linear-gradient(135deg,#61dafb,#282c34)',color:'#fff',padding:'6px 16px',borderRadius:'8px',marginBottom:'10px',fontWeight:'bold',fontSize:'.85rem',display:'flex',alignItems:'center',gap:'8px'}},'⚛️ React 18 — Virtual DOM + Hooks'),
+        h('h2',{style:{margin:'8px 0',fontSize:'1.2rem'}},'🕳️ Tunnel Breach — ALL tests simultaneously'),
+        h('div',{style:{display:'flex',gap:'8px',marginBottom:'12px'}},
+            h('button',{style:{padding:'8px 24px',border:'none',borderRadius:'6px',background:'linear-gradient(135deg,#f85149,#d29922)',color:'#fff',fontWeight:'bold',cursor:'pointer',fontSize:'1rem'},onClick:startBreach,disabled:running},'🕳️ INITIATE BREACH'),
+            h('button',{style:{padding:'8px 24px',border:'none',borderRadius:'6px',background:'#6c757d',color:'#fff',fontWeight:'bold',cursor:'pointer'},onClick:stopBreach,disabled:!running},'⏹ ABORT')
+        ),
+        h('div',{className:'tunnel-hud'},
+            h('div',{className:'tunnel-metrics'},
+                h('div',{className:'tunnel-metric'},h('div',{className:'num',style:{color:fpsColor}},metrics.fps),h('div',{className:'lbl'},'FPS')),
+                h('div',{className:'tunnel-metric'},h('div',{className:'num',style:{color:'#667eea'}},metrics.systems),h('div',{className:'lbl'},'Active Systems')),
+                h('div',{className:'tunnel-metric'},h('div',{className:'num',style:{color:fpsColor}},metrics.threat),h('div',{className:'lbl'},'Threat Level')),
+                h('div',{className:'tunnel-metric'},h('div',{className:'num',style:{color:'#f85149'}},metrics.breach+'%'),h('div',{className:'lbl'},'Breach %'))
+            ),
+            h('div',{className:'tunnel-bar'},h('div',{className:'tunnel-bar-fill',style:{width:barW,background:barColor}})),
+            h('div',{style:{display:'flex',justifyContent:'space-between',marginTop:'4px',fontSize:'.6rem',color:'#8b949e'}},
+                h('span',null,'🟢 Safe'),h('span',null,'🟡 Warning'),h('span',null,'🔴 Critical'),h('span',null,'💀 Breach'))
+        ),
+        h('div',{className:'tunnel-grid'},
+            h('div',{className:'tunnel-cell'},
+                h('div',{className:'tunnel-cell-label',style:{color:'#d2a8ff'}},'🌌 Physics'),
+                h('div',{className:'tunnel-cell-fps',style:{color:fpsColor}},metrics.fps+'fps'),
+                h('canvas',{ref:physRef})
+            ),
+            h('div',{className:'tunnel-cell'},
+                h('div',{className:'tunnel-cell-label',style:{color:'#667eea'}},'💎 WebGL'),
+                h('div',{className:'tunnel-cell-fps',style:{color:fpsColor}},metrics.fps+'fps'),
+                h('canvas',{ref:glRef})
+            ),
+            h('div',{className:'tunnel-cell',ref:clickRef,style:{cursor:'crosshair'}},
+                h('div',{className:'tunnel-cell-label',style:{color:'#f0883e'}},'🎯 Click Storm'),
+                h('div',{className:'tunnel-cell-fps',style:{color:fpsColor}},metrics.fps+'fps'),
+                clickTargets.map(t=>h('div',{key:t.id,className:'tunnel-target',
+                    style:{width:t.sz+'px',height:t.sz+'px',background:t.color,
+                        transform:'translate('+t.x+'px,'+t.y+'px)',position:'absolute'}}))
+            ),
+            h('div',{className:'tunnel-cell',style:{display:'flex',flexDirection:'column'}},
+                h('div',{className:'tunnel-cell-label',style:{color:'#f85149'}},'🔐 Crypto + Data'),
+                h('div',{className:'tunnel-cell-fps',style:{color:fpsColor}},metrics.fps+'fps'),
+                h('div',{style:{flex:1,overflowY:'auto',padding:'24px 8px 8px',fontFamily:'monospace',fontSize:'.65rem',color:'#8b949e',whiteSpace:'pre-wrap'}},
+                    logLines.map((l,i)=>h('div',{key:i},l))
+                )
+            )
+        ),
+        breachActive?h('div',{className:'breach-overlay active'}):null
+    );
+}
+
+ReactDOM.createRoot(document.getElementById('bench-root')).render(h(App));
+})();
+</script>

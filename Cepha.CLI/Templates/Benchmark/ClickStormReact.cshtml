@@ -1,0 +1,195 @@
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<style>
+.storm-arena{position:relative;width:100%;height:500px;overflow:hidden;background:#0a0a1a;border-radius:8px;border:1px solid #333;cursor:crosshair}
+.storm-target{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;cursor:pointer;user-select:none;will-change:transform;transition:none}
+.storm-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.storm-metric{text-align:center}.storm-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.storm-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+.storm-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.storm-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.storm-ctrl input[type=range]{width:120px;accent-color:#f0883e}
+.storm-btn{padding:6px 16px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:.8rem}
+</style>
+<div id="bench-root"></div>
+
+<script>
+(function(){
+const h = React.createElement;
+const {useState, useEffect, useRef, useCallback, useMemo} = React;
+const _bench = window.__cephaBench;
+const isAuto = _bench && _bench.active;
+const duration = (_bench && _bench.duration) || 8;
+const colors=['#f0883e','#f85149','#3fb950','#667eea','#d2a8ff','#79c0ff','#e0e0e0','#d29922','#ff6b9d','#00d4aa'];
+let nextId=0;
+
+function App(){
+    const [ctrlTargets, setCtrlTargets] = useState(50);
+    const [ctrlSpeed, setCtrlSpeed] = useState(60);
+    const [ctrlSpawn, setCtrlSpawn] = useState(3);
+    const [running, setRunning] = useState(false);
+    const [targets, setTargets] = useState([]);
+    const [metrics, setMetrics] = useState({fps:0,hits:0,misses:0,avgLat:0,evSec:0,total:0,accuracy:'0%'});
+    const arenaRef = useRef(null);
+    const stateRef = useRef({hits:0,misses:0,total:0,latencies:[],evThisSec:0,lastEvTime:0,frames:0,lastFpsTime:0,fps:60,running:false});
+    const animRef = useRef(null);
+    const targetsRef = useRef([]);
+
+    const createTarget = useCallback((x,y,sz)=>{
+        sz = sz || Math.random()*30+14;
+        const t = {id:nextId++,x:x??-1,y:y??-1,vx:(Math.random()-.5)*4,vy:(Math.random()-.5)*4,sz,
+            color:colors[Math.floor(Math.random()*colors.length)],dead:false,opacity:1,scale:1,lastRender:performance.now(),needsInit:x==null};
+        targetsRef.current.push(t);
+        return t;
+    },[]);
+
+    const handleTargetDown = useCallback((e, tid)=>{
+        e.preventDefault(); e.stopPropagation();
+        const s = stateRef.current;
+        const t = targetsRef.current.find(x=>x.id===tid);
+        if(!t||t.dead) return;
+        const lat = performance.now()-t.lastRender;
+        s.latencies.push(lat); s.hits++; s.total++; s.evThisSec++;
+        const spawn = stateRef.current.spawn||3;
+        for(let i=0;i<spawn;i++) createTarget(t.x+Math.random()*40-20,t.y+Math.random()*40-20,t.sz*.7);
+        t.scale=1.5; t.opacity=0;
+        setTimeout(()=>{t.dead=true;},150);
+    },[createTarget]);
+
+    const handleArenaMiss = useCallback(()=>{
+        const s=stateRef.current; s.misses++; s.total++; s.evThisSec++;
+    },[]);
+
+    const tick = useCallback((now)=>{
+        const s = stateRef.current;
+        if(!s.running) return;
+        const arena = arenaRef.current;
+        if(!arena){animRef.current=requestAnimationFrame(tick);return;}
+        const W=arena.clientWidth, H=arena.clientHeight;
+        const spd = s.speed/60;
+        let tgts = targetsRef.current;
+
+        for(const t of tgts){
+            if(t.needsInit){t.x=Math.random()*(W-t.sz);t.y=Math.random()*(H-t.sz);t.needsInit=false;}
+        }
+        tgts = tgts.filter(t=>!t.dead);
+        targetsRef.current = tgts;
+
+        for(const t of tgts){
+            t.x+=t.vx*spd; t.y+=t.vy*spd;
+            if(t.x<0||t.x>W-t.sz) t.vx*=-1;
+            if(t.y<0||t.y>H-t.sz) t.vy*=-1;
+            t.x=Math.max(0,Math.min(W-t.sz,t.x));
+            t.y=Math.max(0,Math.min(H-t.sz,t.y));
+            t.lastRender=now;
+            if(Math.random()<.02){t.vx+=(Math.random()-.5)*2;t.vy+=(Math.random()-.5)*2;}
+        }
+
+        while(tgts.length<s.targetCount) createTarget();
+
+        s.frames++;
+        if(now-s.lastFpsTime>=500){
+            s.fps=Math.round(s.frames*1000/(now-s.lastFpsTime));
+            s.frames=0; s.lastFpsTime=now;
+        }
+        let evSec=0;
+        if(now-s.lastEvTime>=1000){evSec=s.evThisSec;s.evThisSec=0;s.lastEvTime=now;}
+
+        const avgLat=s.latencies.length?Math.round(s.latencies.reduce((a,b)=>a+b,0)/s.latencies.length):0;
+        const acc=s.total>0?Math.round(s.hits/s.total*100)+'%':'0%';
+        setMetrics({fps:s.fps,hits:s.hits,misses:s.misses,avgLat,evSec:evSec||undefined,total:s.total,accuracy:acc});
+        setTargets([...tgts]);
+        animRef.current=requestAnimationFrame(tick);
+    },[createTarget]);
+
+    const start = useCallback(()=>{
+        const s=stateRef.current;
+        s.hits=0;s.misses=0;s.total=0;s.latencies=[];s.frames=0;s.lastFpsTime=performance.now();s.lastEvTime=performance.now();s.evThisSec=0;s.fps=60;s.running=true;
+        s.targetCount=ctrlTargets;s.speed=ctrlSpeed;s.spawn=ctrlSpawn;
+        nextId=0; targetsRef.current=[];
+        for(let i=0;i<ctrlTargets;i++) createTarget();
+        setRunning(true);
+        animRef.current=requestAnimationFrame(tick);
+    },[ctrlTargets,ctrlSpeed,ctrlSpawn,createTarget,tick]);
+
+    const stop = useCallback(()=>{
+        stateRef.current.running=false;
+        setRunning(false);
+        if(animRef.current) cancelAnimationFrame(animRef.current);
+        const s=stateRef.current;
+        const avgLat=s.latencies.length?s.latencies.reduce((a,b)=>a+b,0)/s.latencies.length:999;
+        const acc=s.total>0?s.hits/s.total*100:0;
+        const score=Math.min(100,Math.round(s.fps*1.5+(avgLat<5?40:avgLat<10?25:avgLat<20?15:5)+acc*0.3));
+        if(_bench&&_bench.active){
+            if(_bench.battleMode&&_bench.recordScore)_bench.recordScore('clicks',score);
+            else _bench.scores['clicks']=score;
+            _bench.next();
+        }
+    },[]);
+
+    useEffect(()=>{
+        stateRef.current.targetCount=ctrlTargets;stateRef.current.speed=ctrlSpeed;stateRef.current.spawn=ctrlSpawn;
+    },[ctrlTargets,ctrlSpeed,ctrlSpawn]);
+
+    useEffect(()=>{
+        if(isAuto){
+            setTimeout(()=>{
+                const s=stateRef.current;
+                s.targetCount=50;s.speed=60;s.spawn=3;s.hits=0;s.misses=0;s.total=0;s.latencies=[];s.frames=0;
+                s.lastFpsTime=performance.now();s.lastEvTime=performance.now();s.evThisSec=0;s.fps=60;s.running=true;
+                nextId=0;targetsRef.current=[];
+                for(let i=0;i<50;i++) createTarget();
+                setRunning(true);
+                animRef.current=requestAnimationFrame(tick);
+                const clickIv=setInterval(()=>{
+                    if(!stateRef.current.running)return;
+                    for(let i=0;i<5;i++){
+                        const alive=targetsRef.current.filter(t=>!t.dead);
+                        if(alive.length){
+                            const t=alive[Math.floor(Math.random()*alive.length)];
+                            const lat=performance.now()-t.lastRender;
+                            stateRef.current.latencies.push(lat);stateRef.current.hits++;stateRef.current.total++;stateRef.current.evThisSec++;
+                            for(let j=0;j<3;j++) createTarget(t.x+Math.random()*40-20,t.y+Math.random()*40-20,t.sz*.7);
+                            t.scale=1.5;t.opacity=0;
+                            setTimeout(()=>{t.dead=true;},150);
+                        }
+                    }
+                },50);
+                setTimeout(()=>{clearInterval(clickIv);stop();},duration*1000);
+            },50);
+        }
+        return()=>{if(animRef.current)cancelAnimationFrame(animRef.current);};
+    },[]);
+
+    const fpsColor=metrics.fps>=50?'#3fb950':metrics.fps>=30?'#d29922':'#f85149';
+
+    return h('div',{style:{maxWidth:'1200px',margin:'0 auto'}},
+        h('div',{style:{background:'linear-gradient(135deg,#61dafb,#282c34)',color:'#fff',padding:'6px 16px',borderRadius:'8px',marginBottom:'10px',fontWeight:'bold',fontSize:'.85rem',display:'flex',alignItems:'center',gap:'8px'}},'⚛️ React 18 — Virtual DOM + Hooks'),
+        h('h2',{style:{margin:'8px 0',fontSize:'1.2rem'}},'🎯 Click Storm — Hit the moving targets'),
+        h('div',{className:'storm-ctrl'},
+            h('div',null,h('label',null,'Targets'),h('br'),h('input',{type:'range',min:20,max:500,value:ctrlTargets,onChange:e=>setCtrlTargets(+e.target.value)}),h('span',{style:{color:'#f0883e',fontWeight:'bold',marginLeft:'4px'}},ctrlTargets)),
+            h('div',null,h('label',null,'Speed'),h('br'),h('input',{type:'range',min:1,max:200,value:ctrlSpeed,onChange:e=>setCtrlSpeed(+e.target.value)}),h('span',{style:{color:'#f0883e',fontWeight:'bold',marginLeft:'4px'}},ctrlSpeed)),
+            h('div',null,h('label',null,'Spawn on Click'),h('br'),h('input',{type:'range',min:0,max:10,value:ctrlSpawn,onChange:e=>setCtrlSpawn(+e.target.value)}),h('span',{style:{color:'#f0883e',fontWeight:'bold',marginLeft:'4px'}},ctrlSpawn)),
+            h('button',{className:'storm-btn',style:{background:'#28a745',color:'#fff'},onClick:start,disabled:running},'▶ START'),
+            h('button',{className:'storm-btn',style:{background:'#dc3545',color:'#fff'},onClick:stop,disabled:!running},'⏹ STOP')
+        ),
+        h('div',{className:'storm-metrics'},
+            h('div',{className:'storm-metric'},h('div',{className:'num',style:{color:fpsColor}},metrics.fps),h('div',{className:'lbl'},'FPS')),
+            h('div',{className:'storm-metric'},h('div',{className:'num',style:{color:'#f0883e'}},metrics.hits),h('div',{className:'lbl'},'Hits')),
+            h('div',{className:'storm-metric'},h('div',{className:'num',style:{color:'#f85149'}},metrics.misses),h('div',{className:'lbl'},'Misses')),
+            h('div',{className:'storm-metric'},h('div',{className:'num',style:{color:'#79c0ff'}},metrics.avgLat),h('div',{className:'lbl'},'Avg Latency ms')),
+            h('div',{className:'storm-metric'},h('div',{className:'num',style:{color:'#d2a8ff'}},metrics.evSec||0),h('div',{className:'lbl'},'Events/sec')),
+            h('div',{className:'storm-metric'},h('div',{className:'num',style:{color:'#667eea'}},targets.length),h('div',{className:'lbl'},'Active Targets')),
+            h('div',{className:'storm-metric'},h('div',{className:'num',style:{color:'#e0e0e0'}},metrics.total),h('div',{className:'lbl'},'Total Clicks')),
+            h('div',{className:'storm-metric'},h('div',{className:'num',style:{color:'#3fb950'}},metrics.accuracy),h('div',{className:'lbl'},'Accuracy'))
+        ),
+        h('div',{className:'storm-arena',ref:arenaRef,onPointerDown:e=>{if(e.target===arenaRef.current)handleArenaMiss();}},
+            targets.map(t=>h('div',{key:t.id,className:'storm-target',
+                style:{width:t.sz+'px',height:t.sz+'px',background:t.color,fontSize:Math.max(8,t.sz*.35)+'px',color:'#fff',
+                    transform:'translate('+t.x+'px,'+t.y+'px) scale('+t.scale+')',opacity:t.opacity},
+                onPointerDown:e=>handleTargetDown(e,t.id)},'●'))
+        )
+    );
+}
+
+ReactDOM.createRoot(document.getElementById('bench-root')).render(h(App));
+})();
+</script>

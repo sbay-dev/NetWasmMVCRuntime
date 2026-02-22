@@ -1,0 +1,9 @@
+# 🧬 Cloudflare Pages — Cepha Deployment
+# Place this at your project root
+# Deploy: npx wrangler pages deploy ./publish/wwwroot
+
+name = "cepha-app"
+compatibility_date = "2025-01-01"
+
+[site]
+bucket = "./publish/wwwroot"

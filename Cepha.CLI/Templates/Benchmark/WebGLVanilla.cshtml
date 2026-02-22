@@ -1,0 +1,195 @@
+<div id="bench-root"></div>
+
+<script>
+(function(){
+    const _bench=window.__cephaBench;
+    const isAuto=_bench&&_bench.active;
+    const duration=(_bench&&_bench.duration)||8;
+    let gl,running=false,animId,particleCount=50000;
+    let fpsFrames=0,lastFpsTime=performance.now(),currentFps=60;
+    let posBuffer,velBuffer,positions,velocities,program,timeLoc,sizeLoc,drawCalls=0;
+
+    // ── Build entire UI from JavaScript (Svelte-compiled style) ──
+    const app=document.getElementById('bench-root');
+
+    const style=document.createElement('style');
+    style.textContent=`
+.gl-canvas{width:100%;height:520px;background:#000;border-radius:8px;border:1px solid #333;display:block}
+.gl-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.gl-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.gl-ctrl input[type=range]{width:110px;accent-color:#667eea}
+.gl-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.gl-metric{text-align:center}.gl-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.gl-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}`;
+    document.head.appendChild(style);
+
+    const root=document.createElement('div');
+    root.style.cssText='max-width:1200px;margin:0 auto;';
+
+    // Banner
+    const banner=document.createElement('div');
+    banner.style.cssText='background:#f0883e;color:#fff;padding:6px 14px;border-radius:6px;margin-bottom:8px;font-weight:bold;font-size:.85rem;';
+    banner.textContent='\u{1F7E0} Vanilla JS (Svelte-compiled)';
+    root.appendChild(banner);
+
+    // Title
+    const h2=document.createElement('h2');
+    h2.style.cssText='margin:8px 0;font-size:1.2rem;';
+    h2.textContent='\u{1F48E} WebGL Forge \u2014 GPU particle storm';
+    root.appendChild(h2);
+
+    // Controls
+    const ctrl=document.createElement('div');
+    ctrl.className='gl-ctrl';
+    function makeSlider(label,id,min,max,val,step){
+        const wrap=document.createElement('div');
+        const lbl=document.createElement('label');lbl.textContent=label;
+        wrap.appendChild(lbl);wrap.appendChild(document.createElement('br'));
+        const inp=document.createElement('input');
+        inp.type='range';inp.id=id;inp.min=min;inp.max=max;inp.value=val;if(step)inp.step=step;
+        const sp=document.createElement('span');
+        sp.id=id.replace('ctrl','val');sp.style.cssText='color:#667eea;font-weight:bold;margin-left:4px';sp.textContent=val;
+        inp.oninput=function(){sp.textContent=this.value;};
+        wrap.appendChild(inp);wrap.appendChild(sp);
+        return wrap;
+    }
+    ctrl.appendChild(makeSlider('Particles','ctrlParts',1000,200000,50000,1000));
+    ctrl.appendChild(makeSlider('Point Size','ctrlSize',1,8,2));
+    ctrl.appendChild(makeSlider('Turbulence','ctrlTurb',0,100,40));
+
+    const btnStart=document.createElement('button');
+    btnStart.id='btnStart';btnStart.style.cssText='padding:6px 16px;border:none;border-radius:6px;background:#28a745;color:#fff;font-weight:bold;cursor:pointer';btnStart.textContent='\u25B6 START';
+    const btnStop=document.createElement('button');
+    btnStop.id='btnStop';btnStop.style.cssText='padding:6px 16px;border:none;border-radius:6px;background:#dc3545;color:#fff;font-weight:bold;cursor:pointer';btnStop.textContent='\u23F9 STOP';btnStop.disabled=true;
+    ctrl.appendChild(btnStart);ctrl.appendChild(btnStop);
+    root.appendChild(ctrl);
+
+    // Metrics
+    const metricsBar=document.createElement('div');
+    metricsBar.className='gl-metrics';
+    const metricsDef=[
+        {id:'mFps',color:'#3fb950',label:'FPS'},
+        {id:'mVerts',color:'#667eea',label:'Vertices'},
+        {id:'mDrawCalls',color:'#f0883e',label:'Draw Calls'},
+        {id:'mGpuTime',color:'#d2a8ff',label:'GPU ms'},
+        {id:'mFrameTime',color:'#d29922',label:'Frame ms'}
+    ];
+    for(const m of metricsDef){
+        const d=document.createElement('div');d.className='gl-metric';
+        const n=document.createElement('div');n.className='num';n.id=m.id;n.style.color=m.color;n.textContent='0';
+        const l=document.createElement('div');l.className='lbl';l.textContent=m.label;
+        d.appendChild(n);d.appendChild(l);metricsBar.appendChild(d);
+    }
+    root.appendChild(metricsBar);
+
+    // Canvas
+    const canvas=document.createElement('canvas');
+    canvas.id='glCanvas';canvas.className='gl-canvas';
+    root.appendChild(canvas);
+
+    app.appendChild(root);
+
+    function resize(){canvas.width=canvas.clientWidth;canvas.height=canvas.clientHeight;if(gl)gl.viewport(0,0,canvas.width,canvas.height);}
+    resize();window.addEventListener('resize',resize);
+
+    // ── WebGL logic (identical to original) ──
+    const VS=`attribute vec2 aPos;uniform float uTime;uniform float uSize;varying vec3 vColor;
+    void main(){
+        float angle=uTime*.5+aPos.x*3.0;
+        vec2 p=aPos+vec2(sin(angle+aPos.y*10.0),cos(angle+aPos.x*10.0))*.15;
+        gl_Position=vec4(p,0,1);gl_PointSize=uSize;
+        vColor=vec3(.4+sin(aPos.x*5.0+uTime)*.3,.5+cos(aPos.y*7.0+uTime)*.3,.9);
+    }`;
+    const FS=`precision mediump float;varying vec3 vColor;
+    void main(){
+        float d=length(gl_PointCoord-.5);
+        if(d>.5)discard;
+        float alpha=1.0-d*2.0;
+        gl_FragColor=vec4(vColor*alpha,alpha*.8);
+    }`;
+
+    function initGL(){
+        gl=canvas.getContext('webgl',{antialias:false,alpha:false});
+        if(!gl){alert('WebGL not supported');return false;}
+        gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+        function compile(type,src){
+            const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
+            if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){console.error(gl.getShaderInfoLog(s));return null;}return s;
+        }
+        const vs=compile(gl.VERTEX_SHADER,VS),fs=compile(gl.FRAGMENT_SHADER,FS);
+        program=gl.createProgram();gl.attachShader(program,vs);gl.attachShader(program,fs);gl.linkProgram(program);
+        gl.useProgram(program);
+        timeLoc=gl.getUniformLocation(program,'uTime');
+        sizeLoc=gl.getUniformLocation(program,'uSize');
+        posBuffer=gl.createBuffer();
+        return true;
+    }
+
+    function initParticles(n){
+        particleCount=n;
+        positions=new Float32Array(n*2);velocities=new Float32Array(n*2);
+        for(let i=0;i<n;i++){
+            const angle=Math.random()*Math.PI*2,r=Math.random()*.8;
+            positions[i*2]=Math.cos(angle)*r;positions[i*2+1]=Math.sin(angle)*r;
+            velocities[i*2]=(Math.random()-.5)*.01;velocities[i*2+1]=(Math.random()-.5)*.01;
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER,posBuffer);gl.bufferData(gl.ARRAY_BUFFER,positions,gl.DYNAMIC_DRAW);
+        const aPos=gl.getAttribLocation(program,'aPos');gl.enableVertexAttribArray(aPos);gl.vertexAttribPointer(aPos,2,gl.FLOAT,false,0,0);
+    }
+
+    function tick(time){
+        if(!running)return;
+        const t0=performance.now();
+        const turb=+document.getElementById('ctrlTurb').value/1000;
+        const pSize=+document.getElementById('ctrlSize').value;
+        const t=time*.001;
+
+        for(let i=0;i<particleCount;i++){
+            const ix=i*2,iy=i*2+1;
+            velocities[ix]+=(Math.random()-.5)*turb;velocities[iy]+=(Math.random()-.5)*turb;
+            velocities[ix]-=positions[ix]*.001;velocities[iy]-=positions[iy]*.001;
+            positions[ix]+=velocities[ix];positions[iy]+=velocities[iy];
+            velocities[ix]*=.999;velocities[iy]*=.999;
+            if(Math.abs(positions[ix])>1){positions[ix]*=.9;velocities[ix]*=-.5;}
+            if(Math.abs(positions[iy])>1){positions[iy]*=.9;velocities[iy]*=-.5;}
+        }
+
+        gl.bindBuffer(gl.ARRAY_BUFFER,posBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,0,positions);
+        gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.uniform1f(timeLoc,t);gl.uniform1f(sizeLoc,pSize);
+        gl.drawArrays(gl.POINTS,0,particleCount);
+        drawCalls++;
+
+        const now=performance.now();fpsFrames++;
+        if(now-lastFpsTime>=500){
+            currentFps=Math.round(fpsFrames*1000/(now-lastFpsTime));fpsFrames=0;lastFpsTime=now;
+            document.getElementById('mFps').textContent=currentFps;
+            document.getElementById('mFps').style.color=currentFps>=50?'#3fb950':currentFps>=30?'#d29922':'#f85149';
+            document.getElementById('mDrawCalls').textContent=drawCalls;drawCalls=0;
+        }
+        document.getElementById('mVerts').textContent=particleCount.toLocaleString();
+        document.getElementById('mFrameTime').textContent=(now-t0).toFixed(1);
+        document.getElementById('mGpuTime').textContent=(now-t0).toFixed(1);
+
+        animId=requestAnimationFrame(tick);
+    }
+
+    function start(){
+        if(!gl&&!initGL())return;
+        const n=+document.getElementById('ctrlParts').value;
+        initParticles(n);running=true;fpsFrames=0;lastFpsTime=performance.now();animId=requestAnimationFrame(tick);
+        btnStart.disabled=true;btnStop.disabled=false;
+    }
+    function stop(){running=false;if(animId)cancelAnimationFrame(animId);
+        btnStart.disabled=false;btnStop.disabled=true;
+        if(isAuto&&_bench){
+            _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps*1.6));
+            history.pushState({},'','/benchmark');
+            dispatchEvent(new PopStateEvent('popstate'));
+        }
+    }
+    btnStart.onclick=start;
+    btnStop.onclick=stop;
+    document.getElementById('ctrlParts').onchange=function(){if(running){const n=+this.value;initParticles(n);}};
+
+    if(isAuto){start();setTimeout(stop,duration*1000);}
+})();
+</script>

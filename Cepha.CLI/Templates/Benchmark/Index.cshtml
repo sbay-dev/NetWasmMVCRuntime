@@ -1,0 +1,368 @@
+<div class="cepha-hero" style="padding:16px 0 8px">
+    <h1>⚡ Cepha Benchmark Suite</h1>
+    <p class="lead">Framework Battle — Cepha vs React vs Vue vs Vanilla JS</p>
+</div>
+
+<!-- Persistent FPS bar -->
+<div id="globalFps" style="position:fixed;top:0;left:0;right:0;height:32px;background:#0d1117;display:flex;align-items:center;padding:0 16px;z-index:9999;border-bottom:1px solid #30363d;font-family:monospace;font-size:.8rem;">
+    <span style="color:#8b949e;margin-right:8px;">MAIN THREAD</span>
+    <span id="gFpsVal" style="color:#3fb950;font-weight:bold;min-width:50px;">-- fps</span>
+    <span style="color:#30363d;margin:0 12px;">│</span>
+    <span style="color:#8b949e;margin-right:8px;">FRAME TIME</span>
+    <span id="gFrameTime" style="color:#79c0ff;font-weight:bold;min-width:60px;">-- ms</span>
+    <span style="flex:1"></span>
+    <button id="btnAutoPilot" style="padding:4px 14px;border:none;border-radius:4px;background:#667eea;color:#fff;font-weight:bold;cursor:pointer;font-size:.75rem;">🤖 AUTO-PILOT</button>
+    <button id="btnBattle" style="padding:4px 14px;border:none;border-radius:4px;background:#f0883e;color:#fff;font-weight:bold;cursor:pointer;font-size:.75rem;margin-left:6px;">⚔️ FRAMEWORK BATTLE</button>
+    <button id="btnManual" style="padding:4px 14px;border:none;border-radius:4px;background:#6c757d;color:#fff;font-weight:bold;cursor:pointer;font-size:.75rem;margin-left:6px;display:none;">✋ STOP</button>
+</div>
+
+<div style="margin-top:40px;">
+    <!-- Auto-pilot status -->
+    <div id="autoStatus" style="display:none;margin-bottom:16px;padding:12px;background:#1a1a2e;border-radius:8px;border:1px solid #667eea;">
+        <div style="display:flex;align-items:center;gap:12px;">
+            <div class="auto-spinner"></div>
+            <span id="autoLabel" style="color:#667eea;font-weight:bold;">Running: ...</span>
+            <span style="flex:1"></span>
+            <span id="autoProgress" style="color:#8b949e;font-family:monospace;">0/8</span>
+        </div>
+        <div style="margin-top:8px;height:4px;background:#30363d;border-radius:2px;overflow:hidden;">
+            <div id="autoBar" style="height:100%;background:#667eea;width:0%;transition:width .3s ease;"></div>
+        </div>
+    </div>
+
+    <!-- Framework selector tabs -->
+    <div id="fxTabs" style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap;">
+        <button class="fx-tab active" data-fx="cepha" style="background:#667eea">🧬 Cepha</button>
+        <button class="fx-tab" data-fx="react">⚛️ React</button>
+        <button class="fx-tab" data-fx="vue">🟢 Vue</button>
+        <button class="fx-tab" data-fx="vanilla">🟠 Vanilla</button>
+        <button class="fx-tab" data-fx="all" style="margin-left:auto;background:#f0883e;">📊 Compare All</button>
+    </div>
+
+    <!-- Test cards (Cepha default) -->
+    <div id="testGrid" class="cepha-features" style="grid-template-columns:repeat(auto-fit,minmax(250px,1fr));">
+    </div>
+
+    <!-- Comparison table (hidden by default) -->
+    <div id="compareTable" style="display:none;overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-family:monospace;font-size:.85rem;">
+            <thead>
+                <tr style="border-bottom:2px solid #30363d;">
+                    <th style="text-align:left;padding:8px;color:#8b949e;">Test</th>
+                    <th style="padding:8px;color:#667eea;">🧬 Cepha</th>
+                    <th style="padding:8px;color:#61dafb;">⚛️ React</th>
+                    <th style="padding:8px;color:#42b883;">🟢 Vue</th>
+                    <th style="padding:8px;color:#f0883e;">🟠 Vanilla</th>
+                </tr>
+            </thead>
+            <tbody id="compareBody"></tbody>
+            <tfoot>
+                <tr style="border-top:2px solid #30363d;font-weight:bold;">
+                    <td style="padding:8px;color:#8b949e;">AVERAGE</td>
+                    <td style="padding:8px;text-align:center;" id="avgCepha">—</td>
+                    <td style="padding:8px;text-align:center;" id="avgReact">—</td>
+                    <td style="padding:8px;text-align:center;" id="avgVue">—</td>
+                    <td style="padding:8px;text-align:center;" id="avgVanilla">—</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+
+    <!-- Final Score -->
+    <div id="finalReport" style="display:none;margin-top:20px;padding:20px;background:linear-gradient(135deg,#0d1117,#1a1a2e);border-radius:12px;border:1px solid #667eea;">
+        <h2 style="text-align:center;color:#667eea;margin-bottom:16px;">📊 FRAMEWORK BATTLE REPORT</h2>
+        <div id="reportGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;"></div>
+        <div style="text-align:center;margin-top:20px;">
+            <div style="font-size:3rem;font-weight:bold;font-family:monospace;" id="totalScore">—</div>
+            <div style="color:#8b949e;text-transform:uppercase;font-size:.7rem;letter-spacing:.1em;" id="totalLabel">Cepha Score</div>
+        </div>
+    </div>
+</div>
+
+<style>
+.auto-spinner{width:16px;height:16px;border:2px solid #667eea;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.bench-card{position:relative;transition:transform .2s,border-color .3s}
+.bench-card:hover{transform:translateY(-3px);border-color:#667eea}
+.card-score{position:absolute;top:10px;right:10px;font-family:monospace;font-weight:bold;font-size:1rem;color:#3fb950}
+.fx-tab{padding:6px 14px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-weight:bold;font-size:.75rem;transition:all .2s}
+.fx-tab:hover{border-color:#667eea;color:#fff}
+.fx-tab.active{background:#667eea;color:#fff;border-color:#667eea}
+.bar-fill{height:20px;border-radius:3px;transition:width .5s ease;min-width:2px}
+</style>
+
+<script>
+(function(){
+    const testDefs = [
+        { key:'stress',  name:'🔥 Animation Storm', desc:'500 spring-physics nodes, mitosis splitting.', routes:{ cepha:'/benchmark/stress', react:null, vue:null, vanilla:null }},
+        { key:'frames',  name:'🎬 DOM Flood', desc:'Raw frame throughput — thousands of DOM writes/sec.', routes:{ cepha:'/benchmark/frames', react:null, vue:null, vanilla:null }},
+        { key:'clicks',  name:'🎯 Click Storm', desc:'Moving targets — event latency under fire.', routes:{ cepha:'/benchmark/clicks', react:'/benchmark/clicks-react', vue:'/benchmark/clicks-vue', vanilla:'/benchmark/clicks-vanilla' }},
+        { key:'physics', name:'🌌 Particle Physics', desc:'N-body gravity, 5000 particles.', routes:{ cepha:'/benchmark/physics', react:'/benchmark/physics-react', vue:'/benchmark/physics-vue', vanilla:'/benchmark/physics-vanilla' }},
+        { key:'3d',      name:'💎 WebGL Forge', desc:'100K vertices, GPU saturation.', routes:{ cepha:'/benchmark/3d', react:'/benchmark/3d-react', vue:'/benchmark/3d-vue', vanilla:'/benchmark/3d-vanilla' }},
+        { key:'data',    name:'🗄️ Data Siege', desc:'Millions of objects — sort, search, transform.', routes:{ cepha:'/benchmark/data', react:'/benchmark/data-react', vue:'/benchmark/data-vue', vanilla:'/benchmark/data-vanilla' }},
+        { key:'crypto',  name:'🔐 Crypto Matryoshka', desc:'Nested AES + SHA-256 deep chain.', routes:{ cepha:'/benchmark/crypto', react:'/benchmark/crypto-react', vue:'/benchmark/crypto-vue', vanilla:'/benchmark/crypto-vanilla' }},
+        { key:'tunnel',  name:'🕳️ Tunnel Breach', desc:'ALL tests simultaneously.', routes:{ cepha:'/benchmark/tunnel', react:'/benchmark/tunnel-react', vue:'/benchmark/tunnel-vue', vanilla:'/benchmark/tunnel-vanilla' }}
+    ];
+    const fxColors = { cepha:'#667eea', react:'#61dafb', vue:'#42b883', vanilla:'#f0883e' };
+    const fxLabels = { cepha:'🧬 Cepha', react:'⚛️ React', vue:'🟢 Vue', vanilla:'🟠 Vanilla' };
+    let currentFx = 'cepha';
+
+    // Global FPS meter
+    let frames=0,lastTime=performance.now();
+    function fpsLoop(){
+        frames++;const now=performance.now();
+        if(now-lastTime>=500){
+            const fps=Math.round(frames*1000/(now-lastTime));
+            const ft=((now-lastTime)/frames).toFixed(1);
+            frames=0;lastTime=now;
+            const el=document.getElementById('gFpsVal'),ft_el=document.getElementById('gFrameTime');
+            if(el){el.textContent=fps+' fps';el.style.color=fps>=50?'#3fb950':fps>=30?'#d29922':'#f85149';}
+            if(ft_el)ft_el.textContent=ft+' ms';
+        }
+        requestAnimationFrame(fpsLoop);
+    }
+    requestAnimationFrame(fpsLoop);
+
+    // ── Build test cards ──
+    function renderCards(fx) {
+        const grid = document.getElementById('testGrid');
+        grid.innerHTML = '';
+        document.getElementById('compareTable').style.display = fx==='all' ? 'block' : 'none';
+        if (fx === 'all') { renderCompareTable(); return; }
+
+        testDefs.forEach(t => {
+            const route = t.routes[fx] || t.routes.cepha;
+            const a = document.createElement('a');
+            a.href = route;
+            a.className = 'cepha-card bench-card';
+            a.dataset.test = t.key;
+            a.style.cssText = 'text-decoration:none;color:inherit;';
+            const avail = t.routes[fx] !== null && t.routes[fx] !== undefined;
+            a.innerHTML = `<h3>${t.name}</h3><p>${t.desc}</p>` +
+                (avail ? '' : '<div style="position:absolute;top:8px;left:8px;font-size:.6rem;color:#f85149;background:#1a0a0a;padding:2px 6px;border-radius:3px;">Cepha only</div>') +
+                `<div class="card-score" id="score${t.key.charAt(0).toUpperCase()+t.key.slice(1)}">—</div>`;
+            grid.appendChild(a);
+        });
+        restoreScores();
+    }
+
+    function renderCompareTable() {
+        const body = document.getElementById('compareBody');
+        body.innerHTML = '';
+        const bench = window.__cephaBench;
+        const allScores = bench ? bench.allScores || {} : {};
+        const fxKeys = ['cepha','react','vue','vanilla'];
+
+        testDefs.forEach(t => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid #21262d';
+            let html = `<td style="padding:8px;color:#c9d1d9;">${t.name}</td>`;
+            fxKeys.forEach(fx => {
+                const score = allScores[fx] && allScores[fx][t.key];
+                const s = score != null ? score : '—';
+                const color = score != null ? (score >= 80 ? '#3fb950' : score >= 50 ? '#d29922' : '#f85149') : '#8b949e';
+                const barW = score != null ? Math.min(100, score) : 0;
+                html += `<td style="padding:8px;text-align:center;"><div style="color:${color};font-weight:bold;">${s}</div><div style="background:#21262d;border-radius:3px;height:6px;margin-top:4px;"><div class="bar-fill" style="width:${barW}%;background:${fxColors[fx]}"></div></div></td>`;
+            });
+            tr.innerHTML = html;
+            body.appendChild(tr);
+        });
+
+        // Averages
+        fxKeys.forEach(fx => {
+            const scores = allScores[fx] || {};
+            const vals = Object.values(scores);
+            const avg = vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length) : '—';
+            const el = document.getElementById('avg' + fx.charAt(0).toUpperCase() + fx.slice(1));
+            if (el) { el.textContent = avg; el.style.color = typeof avg === 'number' ? (avg>=80?'#3fb950':avg>=50?'#d29922':'#f85149') : '#8b949e'; }
+        });
+    }
+
+    function restoreScores() {
+        const bench = window.__cephaBench;
+        if (!bench || !bench.scores) return;
+        for (const [t, s] of Object.entries(bench.scores)) {
+            const key = 'score' + t.charAt(0).toUpperCase() + t.slice(1);
+            const el = document.getElementById(key);
+            if (el) el.textContent = s + 'pts';
+        }
+    }
+
+    // ── Tab switching ──
+    document.querySelectorAll('.fx-tab').forEach(btn => {
+        btn.onclick = () => {
+            document.querySelectorAll('.fx-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentFx = btn.dataset.fx;
+            renderCards(currentFx);
+        };
+    });
+
+    // ── Auto-pilot (single framework) ──
+    const bench = window.__cephaBench;
+    if (bench && bench.active && bench.scores) { resumeAutoPilot(bench); }
+    else if (bench && bench.complete) { finishRun(bench); }
+
+    document.getElementById('btnAutoPilot').onclick = () => startAuto(currentFx);
+    document.getElementById('btnManual').onclick = () => { if(window.__cephaBench) window.__cephaBench.active=false; };
+
+    // ── Framework Battle (all 4 frameworks sequentially) ──
+    document.getElementById('btnBattle').onclick = startBattle;
+
+    function startAuto(fx) {
+        const queue = testDefs.map(t => ({ key: t.key, route: t.routes[fx] || t.routes.cepha, fx }));
+        window.__cephaBench = {
+            active: true, complete: false,
+            queue: queue.map(q => q.key),
+            routeMap: Object.fromEntries(queue.map(q => [q.key, q.route])),
+            scores: {}, duration: 8, total: queue.length, fx,
+            next() {
+                const key = this.queue.shift();
+                if (!key || !this.active) { this.active=false; this.complete=true; history.pushState({},'','/benchmark'); dispatchEvent(new PopStateEvent('popstate')); return; }
+                this.currentTest = key;
+                this.currentIndex = this.total - this.queue.length;
+                const route = this.routeMap[key];
+                history.pushState({}, '', route);
+                dispatchEvent(new PopStateEvent('popstate'));
+            }
+        };
+        showAutoUI();
+        updateAutoUI(window.__cephaBench, 0);
+        window.__cephaBench.next();
+    }
+
+    function startBattle() {
+        const fxOrder = ['cepha','react','vue','vanilla'];
+        const allQueue = [];
+        fxOrder.forEach(fx => {
+            testDefs.forEach(t => {
+                const route = t.routes[fx];
+                if (route) allQueue.push({ key: t.key, route, fx });
+            });
+        });
+
+        window.__cephaBench = {
+            active: true, complete: false, battleMode: true,
+            queue: allQueue.map(q => q.key + ':' + q.fx),
+            routeMap: Object.fromEntries(allQueue.map(q => [q.key+':'+q.fx, q.route])),
+            fxMap: Object.fromEntries(allQueue.map(q => [q.key+':'+q.fx, q.fx])),
+            scores: {}, allScores: { cepha:{}, react:{}, vue:{}, vanilla:{} },
+            duration: 6, total: allQueue.length,
+            next() {
+                // Capture score from previous test (old pattern: _bench.scores[key]=score)
+                if (this.currentTest && this.currentFx) {
+                    const s = this.scores[this.currentTest];
+                    if (s != null) {
+                        if (!this.allScores[this.currentFx]) this.allScores[this.currentFx] = {};
+                        this.allScores[this.currentFx][this.currentTest] = s;
+                    }
+                }
+                const compound = this.queue.shift();
+                if (!compound || !this.active) { this.active=false; this.complete=true; history.pushState({},'','/benchmark'); dispatchEvent(new PopStateEvent('popstate')); return; }
+                const [key, fx] = compound.split(':');
+                this.currentTest = key;
+                this.currentFx = fx;
+                this.currentIndex = this.total - this.queue.length;
+                const route = this.routeMap[compound];
+                history.pushState({}, '', route);
+                dispatchEvent(new PopStateEvent('popstate'));
+            },
+            recordScore(key, score) {
+                const fx = this.currentFx || 'cepha';
+                this.scores[key] = score;
+                if (!this.allScores[fx]) this.allScores[fx] = {};
+                this.allScores[fx][key] = score;
+            }
+        };
+        showAutoUI();
+        updateAutoUI(window.__cephaBench, 0);
+        window.__cephaBench.next();
+    }
+
+    function resumeAutoPilot(bench) {
+        showAutoUI();
+        restoreScores();
+        updateAutoUI(bench, bench.currentIndex || 0);
+        setTimeout(() => bench.next(), 300);
+    }
+
+    function finishRun(bench) {
+        document.getElementById('autoStatus').style.display='none';
+        document.getElementById('btnAutoPilot').style.display='';
+        document.getElementById('btnBattle').style.display='';
+        document.getElementById('btnManual').style.display='none';
+
+        if (bench.battleMode && bench.allScores) {
+            // Show comparison table
+            document.querySelectorAll('.fx-tab').forEach(b => b.classList.remove('active'));
+            document.querySelector('[data-fx="all"]').classList.add('active');
+            currentFx = 'all';
+            renderCards('all');
+            showBattleReport(bench.allScores);
+        } else {
+            restoreScores();
+            showReport(bench.scores, bench.fx || 'cepha');
+        }
+        window.__cephaBench = bench; // keep allScores for table
+    }
+
+    function showAutoUI() {
+        document.getElementById('btnAutoPilot').style.display='none';
+        document.getElementById('btnBattle').style.display='none';
+        document.getElementById('btnManual').style.display='';
+        document.getElementById('autoStatus').style.display='block';
+        document.getElementById('finalReport').style.display='none';
+    }
+
+    function updateAutoUI(bench, idx) {
+        const testNames = Object.fromEntries(testDefs.map(t=>[t.key,t.name]));
+        const name = testNames[bench.currentTest] || '...';
+        const fxLabel = bench.battleMode ? ` [${fxLabels[bench.currentFx||'cepha']}]` : '';
+        document.getElementById('autoLabel').textContent = 'Running: ' + name + fxLabel;
+        document.getElementById('autoProgress').textContent = (idx+1) + '/' + bench.total;
+        document.getElementById('autoBar').style.width = ((idx / bench.total) * 100) + '%';
+    }
+
+    function showReport(scores, fx) {
+        document.getElementById('finalReport').style.display='block';
+        const grid=document.getElementById('reportGrid');
+        grid.innerHTML='';
+        let total=0,count=0;
+        testDefs.forEach(t => {
+            const s=scores[t.key]||0;total+=s;count++;
+            const div=document.createElement('div');
+            div.style.cssText='padding:12px;background:#161b22;border-radius:8px;text-align:center;';
+            div.innerHTML=`<div style="font-size:.8rem;color:#8b949e;">${t.name}</div><div style="font-size:1.5rem;font-weight:bold;font-family:monospace;color:${s>=80?'#3fb950':s>=50?'#d29922':'#f85149'}">${s}</div>`;
+            grid.appendChild(div);
+        });
+        const avg = count ? Math.round(total/count) : 0;
+        document.getElementById('totalScore').textContent = avg;
+        document.getElementById('totalScore').style.color = avg>=80?'#3fb950':avg>=50?'#d29922':'#f85149';
+        document.getElementById('totalLabel').textContent = fxLabels[fx] + ' Score';
+    }
+
+    function showBattleReport(allScores) {
+        document.getElementById('finalReport').style.display='block';
+        const grid = document.getElementById('reportGrid');
+        grid.innerHTML='';
+        const fxKeys = ['cepha','react','vue','vanilla'];
+        const avgs = {};
+        fxKeys.forEach(fx => {
+            const scores = allScores[fx] || {};
+            const vals = Object.values(scores);
+            avgs[fx] = vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length) : 0;
+            const div = document.createElement('div');
+            div.style.cssText = `padding:16px;background:#161b22;border-radius:8px;text-align:center;border:2px solid ${fxColors[fx]}30;`;
+            div.innerHTML = `<div style="font-size:.9rem;color:${fxColors[fx]};font-weight:bold;">${fxLabels[fx]}</div><div style="font-size:2.5rem;font-weight:bold;font-family:monospace;color:${avgs[fx]>=80?'#3fb950':avgs[fx]>=50?'#d29922':'#f85149'};margin-top:8px;">${avgs[fx]}</div>`;
+            grid.appendChild(div);
+        });
+        const winner = fxKeys.reduce((a,b) => avgs[a]>=avgs[b]?a:b);
+        document.getElementById('totalScore').textContent = '🏆 ' + fxLabels[winner];
+        document.getElementById('totalScore').style.color = fxColors[winner];
+        document.getElementById('totalLabel').textContent = 'Winner — ' + avgs[winner] + ' avg score';
+    }
+
+    // Init
+    renderCards('cepha');
+})();
+</script>

@@ -1,0 +1,64 @@
+@{
+    ViewData["Title"] = "Home";
+}
+
+<div class="home-view">
+    <div class="jumbotron">
+        <h1 class="display-4">Welcome to WasmMvcRuntime!</h1>
+        <p class="lead">This is a demonstration of MVC pattern on WebAssembly with WASM SDK.</p>
+        <hr class="my-4">
+        <p>You can now use familiar MVC patterns like Controllers and Views in your WebAssembly application.</p>
+        <p class="lead">
+            <a class="btn btn-primary btn-lg" href="/weather/index" role="button">View Weather Example</a>
+        </p>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4">
+            <div class="feature-card">
+                <h3>?? Controllers</h3>
+                <p>Use traditional MVC controllers with action methods returning views.</p>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="feature-card">
+                <h3>?? Templates</h3>
+                <p>Create .cshtml templates with strongly-typed models and ViewData.</p>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="feature-card">
+                <h3>? WASM SDK</h3>
+                <p>All running client-side in your browser with the new WASM SDK architecture.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .home-view {
+        padding: 20px;
+    }
+    
+    .jumbotron {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 3rem 2rem;
+        border-radius: 0.5rem;
+        margin-bottom: 2rem;
+    }
+    
+    .feature-card {
+        background: #f8f9fa;
+        padding: 2rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        height: 100%;
+    }
+    
+    .feature-card h3 {
+        color: #667eea;
+        margin-bottom: 1rem;
+    }
+</style>

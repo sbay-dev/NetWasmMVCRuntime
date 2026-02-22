@@ -1,0 +1,169 @@
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+.phys-canvas{width:100%;height:520px;background:#0a0a1a;border-radius:8px;border:1px solid #333;display:block}
+.phys-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.phys-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.phys-ctrl input[type=range]{width:110px;accent-color:#d2a8ff}
+.phys-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.phys-metric{text-align:center}.phys-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.phys-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+.vue-banner{background:linear-gradient(135deg,#42b883,#35495e);color:#fff;padding:6px 16px;border-radius:8px;margin-bottom:10px;font-weight:bold;font-size:.85rem;display:flex;align-items:center;gap:8px}
+</style>
+<div id="bench-root"></div>
+
+<script>
+(function(){
+const{createApp,ref,computed,onMounted,onUnmounted}=Vue;
+const _bench=window.__cephaBench;
+const isAuto=_bench&&_bench.active;
+const duration=(_bench&&_bench.duration)||8;
+const colors=['#667eea','#f0883e','#3fb950','#f85149','#d2a8ff','#79c0ff','#d29922','#ff6b9d','#00d4aa','#e0e0e0'];
+
+createApp({
+    setup(){
+        const ctrlBodies=ref(500);
+        const ctrlGravity=ref(30);
+        const ctrlDt=ref(16);
+        const ctrlTrail=ref(20);
+        const running=ref(false);
+        const currentFps=ref(0);
+        const bodyCount=ref(0);
+        const collisionsTotal=ref(0);
+        const calcsPerFrame=ref(0);
+        const kineticEnergy=ref(0);
+        const frameTime=ref('0');
+        let animId=null,fpsFrames=0,lastFpsTime=0,bodies=[],collisions=0;
+
+        const fpsColor=computed(()=>currentFps.value>=50?'#3fb950':currentFps.value>=30?'#d29922':'#f85149');
+
+        function resize(){
+            const canvas=document.getElementById('physCanvasVue');
+            if(canvas){canvas.width=canvas.clientWidth;canvas.height=canvas.clientHeight;}
+        }
+
+        function init(){
+            const canvas=document.getElementById('physCanvasVue');
+            if(!canvas)return;
+            const W=canvas.width,H=canvas.height;
+            bodies=[];collisions=0;collisionsTotal.value=0;
+            const n=ctrlBodies.value;
+            for(let i=0;i<n;i++){
+                bodies.push({x:Math.random()*W,y:Math.random()*H,
+                    vx:(Math.random()-.5)*2,vy:(Math.random()-.5)*2,
+                    mass:Math.random()*3+.5,r:Math.random()*2.5+1,color:colors[i%colors.length]});
+            }
+        }
+
+        function tick(){
+            if(!running.value)return;
+            const t0=performance.now();
+            const canvas=document.getElementById('physCanvasVue');
+            if(!canvas){animId=requestAnimationFrame(tick);return;}
+            const ctx=canvas.getContext('2d');
+            const G=ctrlGravity.value*.0001;
+            const dt=ctrlDt.value/16;
+            const trail=ctrlTrail.value/100;
+            const W=canvas.width,H=canvas.height;
+            const n=bodies.length;
+            let calcs=0,colThisFrame=0,kE=0;
+
+            for(let i=0;i<n;i++){
+                const a=bodies[i];
+                for(let j=i+1;j<n;j++){
+                    const b=bodies[j];
+                    const dx=b.x-a.x,dy=b.y-a.y;
+                    const distSq=dx*dx+dy*dy+1;
+                    const F=G*a.mass*b.mass/distSq;
+                    const dist=Math.sqrt(distSq);
+                    const fx=F*dx/dist,fy=F*dy/dist;
+                    a.vx+=fx/a.mass*dt;a.vy+=fy/a.mass*dt;
+                    b.vx-=fx/b.mass*dt;b.vy-=fy/b.mass*dt;
+                    calcs++;
+                    if(dist<a.r+b.r+2){
+                        colThisFrame++;collisions++;
+                        const nx=dx/dist,ny=dy/dist;
+                        const dvx=a.vx-b.vx,dvy=a.vy-b.vy;
+                        const dvn=dvx*nx+dvy*ny;
+                        if(dvn>0){
+                            const impulse=2*dvn/(a.mass+b.mass);
+                            a.vx-=impulse*b.mass*nx;a.vy-=impulse*b.mass*ny;
+                            b.vx+=impulse*a.mass*nx;b.vy+=impulse*a.mass*ny;
+                        }
+                    }
+                }
+            }
+
+            for(const b of bodies){
+                b.x+=b.vx*dt;b.y+=b.vy*dt;
+                if(b.x<0){b.x=0;b.vx*=-.8;}if(b.x>W){b.x=W;b.vx*=-.8;}
+                if(b.y<0){b.y=0;b.vy*=-.8;}if(b.y>H){b.y=H;b.vy*=-.8;}
+                kE+=.5*b.mass*(b.vx*b.vx+b.vy*b.vy);
+            }
+
+            ctx.fillStyle=`rgba(10,10,26,${1-trail})`;
+            ctx.fillRect(0,0,W,H);
+            for(const b of bodies){
+                ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);
+                ctx.fillStyle=b.color;ctx.fill();
+            }
+
+            const now=performance.now();
+            fpsFrames++;
+            if(now-lastFpsTime>=500){
+                currentFps.value=Math.round(fpsFrames*1000/(now-lastFpsTime));
+                fpsFrames=0;lastFpsTime=now;
+            }
+            bodyCount.value=n;
+            collisionsTotal.value=collisions;
+            calcsPerFrame.value=calcs;
+            kineticEnergy.value=Math.round(kE);
+            frameTime.value=(performance.now()-t0).toFixed(1);
+
+            animId=requestAnimationFrame(tick);
+        }
+
+        function start(){
+            running.value=true;resize();init();fpsFrames=0;lastFpsTime=performance.now();
+            animId=requestAnimationFrame(tick);
+        }
+        function stop(){
+            running.value=false;if(animId)cancelAnimationFrame(animId);
+            if(isAuto&&_bench){
+                _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps.value*1.6));
+                history.pushState({},'','/benchmark');
+                dispatchEvent(new PopStateEvent('popstate'));
+            }
+        }
+
+        onMounted(()=>{
+            resize();window.addEventListener('resize',resize);
+            if(isAuto){start();setTimeout(stop,duration*1000);}
+        });
+        onUnmounted(()=>{window.removeEventListener('resize',resize);});
+
+        return{ctrlBodies,ctrlGravity,ctrlDt,ctrlTrail,running,currentFps,bodyCount,
+            collisionsTotal,calcsPerFrame,kineticEnergy,frameTime,fpsColor,start,stop};
+    },
+    template:`
+<div style="max-width:1200px;margin:0 auto;">
+    <div class="vue-banner">🟢 Vue 3 <span style="font-weight:normal;font-size:.75rem;">— Composition API + Reactive Proxy</span></div>
+    <h2 style="margin:8px 0;font-size:1.2rem;">🌌 Particle Physics — N-body gravity simulation</h2>
+    <div class="phys-ctrl">
+        <div><label>Bodies</label><br><input type="range" v-model.number="ctrlBodies" min="50" max="5000" step="50"><span style="color:#d2a8ff;font-weight:bold;margin-left:4px">{{ctrlBodies}}</span></div>
+        <div><label>Gravity</label><br><input type="range" v-model.number="ctrlGravity" min="1" max="100"><span style="color:#d2a8ff;font-weight:bold;margin-left:4px">{{ctrlGravity}}</span></div>
+        <div><label>Time Step</label><br><input type="range" v-model.number="ctrlDt" min="1" max="50"><span style="color:#d2a8ff;font-weight:bold;margin-left:4px">{{ctrlDt}}</span></div>
+        <div><label>Trails</label><br><input type="range" v-model.number="ctrlTrail" min="0" max="100"><span style="color:#d2a8ff;font-weight:bold;margin-left:4px">{{ctrlTrail}}</span></div>
+        <button style="padding:6px 16px;border:none;border-radius:6px;background:#28a745;color:#fff;font-weight:bold;cursor:pointer" @click="start" :disabled="running">▶ START</button>
+        <button style="padding:6px 16px;border:none;border-radius:6px;background:#dc3545;color:#fff;font-weight:bold;cursor:pointer" @click="stop" :disabled="!running">⏹ STOP</button>
+    </div>
+    <div class="phys-metrics">
+        <div class="phys-metric"><div class="num" :style="{color:fpsColor}">{{currentFps}}</div><div class="lbl">FPS</div></div>
+        <div class="phys-metric"><div class="num" style="color:#d2a8ff">{{bodyCount}}</div><div class="lbl">Bodies</div></div>
+        <div class="phys-metric"><div class="num" style="color:#f0883e">{{collisionsTotal}}</div><div class="lbl">Collisions</div></div>
+        <div class="phys-metric"><div class="num" style="color:#79c0ff">{{calcsPerFrame}}</div><div class="lbl">Calcs/frame</div></div>
+        <div class="phys-metric"><div class="num" style="color:#e0e0e0">{{kineticEnergy}}</div><div class="lbl">Kinetic Energy</div></div>
+        <div class="phys-metric"><div class="num" style="color:#d29922">{{frameTime}}</div><div class="lbl">Frame ms</div></div>
+    </div>
+    <canvas id="physCanvasVue" class="phys-canvas"></canvas>
+</div>`
+}).mount('#bench-root');
+})();
+</script>

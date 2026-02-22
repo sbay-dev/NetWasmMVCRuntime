@@ -1,0 +1,6 @@
+<Project Sdk="NetWasmMvc.SDK">
+
+  <!-- 🧬 Zero-config Cepha Application — powered by NetWasmMvc.SDK -->
+  <!-- No ProjectReferences, no PackageReferences — the SDK has it all -->
+
+</Project>

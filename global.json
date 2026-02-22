@@ -1,0 +1,6 @@
+{
+  "msbuild-sdks": {
+    "Cepha.Sdk": "1.0.0",
+    "NetWasmMvc.SDK": "1.0.0"
+  }
+}

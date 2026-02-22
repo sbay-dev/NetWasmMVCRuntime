@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ═══════════════════════════════════════════════════════════
+       🧬 NetWasmMvc.SDK — Complete WASM MVC Runtime SDK
+       
+       Usage:  <Project Sdk="NetWasmMvc.SDK">
+       Result: Full Cepha capabilities — zero ProjectReferences needed
+       ═══════════════════════════════════════════════════════════ -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>NetWasmMvc.SDK</PackageId>
+    <Version>1.0.6</Version>
+    <Authors>sbay-dev</Authors>
+    <Company>sbay</Company>
+    <Description>NetWasmMvc SDK — Complete ASP.NET MVC runtime for WebAssembly. Controllers, Views, SignalR, EF Core SQLite, Identity — all bundled. Write MVC apps that run entirely in the browser. Powered by Cepha (Physarum polycephalum).</Description>
+    <PackageTags>cepha;wasm;webassembly;mvc;signalr;efcore;sqlite;blazor;spa;aspnet;controllers;views;identity</PackageTags>
+    <PackageType>MSBuildSdk</PackageType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/sbay-dev/WasmMvcRuntime</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/sbay-dev/WasmMvcRuntime.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.jpg</PackageIcon>
+    <Copyright>Copyright (c) 2026 sbay-dev. All rights reserved.</Copyright>
+
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+  </PropertyGroup>
+
+  <!-- Pack README + icon -->
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="icon.jpg"  Pack="true" PackagePath="" />
+  </ItemGroup>
+
+  <!-- Pack SDK MSBuild files -->
+  <ItemGroup>
+    <None Include="Sdk\Sdk.props"   Pack="true" PackagePath="Sdk" />
+    <None Include="Sdk\Sdk.targets" Pack="true" PackagePath="Sdk" />
+  </ItemGroup>
+
+  <!-- Pack runtime DLLs -->
+  <ItemGroup>
+    <None Include="lib\**\*" Pack="true" PackagePath="lib" />
+  </ItemGroup>
+
+  <!-- Pack shared source files (compiled into consumer) -->
+  <ItemGroup>
+    <None Include="shared\**\*" Pack="true" PackagePath="shared" />
+  </ItemGroup>
+
+  <!-- Pack default content (main.js, index.html) -->
+  <ItemGroup>
+    <None Include="content\**\*" Pack="true" PackagePath="content" />
+  </ItemGroup>
+
+  <!-- Pack deployment templates -->
+  <ItemGroup>
+    <None Include="deploy\**\*" Pack="true" PackagePath="deploy" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="**\*.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,282 @@
+<style>
+.tunnel-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.tunnel-cell{background:#0a0a1a;border:1px solid #333;border-radius:8px;overflow:hidden;position:relative;min-height:240px}
+.tunnel-cell canvas{width:100%;height:100%;display:block}
+.tunnel-cell-label{position:absolute;top:6px;left:8px;font-size:.7rem;font-weight:bold;padding:2px 8px;background:rgba(0,0,0,.7);border-radius:4px;z-index:1}
+.tunnel-cell-fps{position:absolute;top:6px;right:8px;font-size:.8rem;font-weight:bold;font-family:monospace;z-index:1}
+.tunnel-hud{padding:12px;background:linear-gradient(135deg,#0d1117,#1a1a2e);border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.tunnel-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px}
+.tunnel-metric{text-align:center}.tunnel-metric .num{font-size:1.3rem;font-weight:bold;font-family:monospace}.tunnel-metric .lbl{font-size:.55rem;color:#8b949e;text-transform:uppercase}
+.tunnel-bar{height:20px;background:#30363d;border-radius:10px;overflow:hidden;margin-top:8px}
+.tunnel-bar-fill{height:100%;transition:width .3s ease;border-radius:10px}
+.breach-alert{display:none;position:fixed;inset:0;background:rgba(248,81,73,.15);z-index:9998;pointer-events:none}
+.breach-alert.active{display:block;animation:breachPulse 1s ease infinite}
+@keyframes breachPulse{0%,100%{opacity:.15}50%{opacity:.3}}
+</style>
+<div style="max-width:1400px;margin:0 auto;">
+    <h2 style="margin:8px 0;font-size:1.2rem;">🕳️ Tunnel Breach — ALL tests simultaneously</h2>
+
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button id="btnBreach" style="padding:8px 24px;border:none;border-radius:6px;background:linear-gradient(135deg,#f85149,#d29922);color:#fff;font-weight:bold;cursor:pointer;font-size:1rem;">🕳️ INITIATE BREACH</button>
+        <button id="btnAbort" style="padding:8px 24px;border:none;border-radius:6px;background:#6c757d;color:#fff;font-weight:bold;cursor:pointer" disabled>⏹ ABORT</button>
+    </div>
+
+    <div class="tunnel-hud">
+        <div class="tunnel-metrics">
+            <div class="tunnel-metric"><div class="num" id="mFps" style="color:#3fb950">0</div><div class="lbl">Main Thread FPS</div></div>
+            <div class="tunnel-metric"><div class="num" id="mLoad" style="color:#667eea">0%</div><div class="lbl">Thread Load</div></div>
+            <div class="tunnel-metric"><div class="num" id="mPhysBodies" style="color:#d2a8ff">0</div><div class="lbl">Physics Bodies</div></div>
+            <div class="tunnel-metric"><div class="num" id="mGlVerts" style="color:#667eea">0</div><div class="lbl">GL Vertices</div></div>
+            <div class="tunnel-metric"><div class="num" id="mDomNodes" style="color:#f0883e">0</div><div class="lbl">DOM Targets</div></div>
+            <div class="tunnel-metric"><div class="num" id="mDataOps" style="color:#79c0ff">0</div><div class="lbl">Data Ops</div></div>
+            <div class="tunnel-metric"><div class="num" id="mCryptoLayers" style="color:#f85149">0</div><div class="lbl">Crypto Layers</div></div>
+            <div class="tunnel-metric"><div class="num" id="mElapsed" style="color:#e0e0e0">0s</div><div class="lbl">Elapsed</div></div>
+        </div>
+        <div class="tunnel-bar"><div id="loadBar" class="tunnel-bar-fill" style="width:0%;background:#3fb950;"></div></div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:.6rem;color:#8b949e;">
+            <span>🟢 Safe</span><span>🟡 Warning (35fps)</span><span>🔴 Critical (20fps)</span><span>💀 Breach (&lt;10fps)</span>
+        </div>
+    </div>
+
+    <div class="tunnel-grid">
+        <div class="tunnel-cell">
+            <div class="tunnel-cell-label" style="color:#d2a8ff;">🌌 Physics</div>
+            <div class="tunnel-cell-fps" id="fpPhys" style="color:#3fb950;">--</div>
+            <canvas id="cPhys"></canvas>
+        </div>
+        <div class="tunnel-cell">
+            <div class="tunnel-cell-label" style="color:#667eea;">💎 WebGL</div>
+            <div class="tunnel-cell-fps" id="fpGl" style="color:#3fb950;">--</div>
+            <canvas id="cGl"></canvas>
+        </div>
+        <div class="tunnel-cell" id="clickArena" style="cursor:crosshair;">
+            <div class="tunnel-cell-label" style="color:#f0883e;">🎯 Click Storm</div>
+            <div class="tunnel-cell-fps" id="fpClicks" style="color:#3fb950;">--</div>
+        </div>
+        <div class="tunnel-cell" style="display:flex;flex-direction:column;">
+            <div class="tunnel-cell-label" style="color:#f85149;">🔐 Crypto + Data</div>
+            <div class="tunnel-cell-fps" id="fpCrypto" style="color:#3fb950;">--</div>
+            <div id="tunnelLog" style="flex:1;overflow-y:auto;padding:24px 8px 8px;font-family:monospace;font-size:.65rem;color:#8b949e;white-space:pre-wrap;"></div>
+        </div>
+    </div>
+</div>
+<div class="breach-alert" id="breachOverlay"></div>
+
+<script>
+(function(){
+    const _bench=window.__cephaBench;
+    const isAuto=_bench&&_bench.active;
+    const duration=(_bench&&_bench.duration)||8;
+    let running=false,aborted=false,startTime=0;
+    let fpsFrames=0,lastFpsTime=performance.now(),currentFps=60;
+
+    // ── Physics Engine ──
+    const cPhys=document.getElementById('cPhys');
+    const ctxP=cPhys.getContext('2d');
+    let physicsBodies=[];
+    const physColors=['#667eea','#f0883e','#3fb950','#f85149','#d2a8ff','#79c0ff'];
+
+    function initPhysics(){
+        cPhys.width=cPhys.clientWidth;cPhys.height=cPhys.clientHeight;
+        physicsBodies=[];
+        for(let i=0;i<800;i++){
+            physicsBodies.push({x:Math.random()*cPhys.width,y:Math.random()*cPhys.height,
+                vx:(Math.random()-.5)*3,vy:(Math.random()-.5)*3,mass:Math.random()*2+.5,
+                r:Math.random()*2+1,color:physColors[i%physColors.length]});
+        }
+    }
+
+    function tickPhysics(){
+        const W=cPhys.width,H=cPhys.height,n=physicsBodies.length;
+        for(let i=0;i<n;i++){
+            const a=physicsBodies[i];
+            for(let j=i+1;j<Math.min(i+50,n);j++){
+                const b=physicsBodies[j];
+                const dx=b.x-a.x,dy=b.y-a.y,d2=dx*dx+dy*dy+1;
+                const F=.0003*a.mass*b.mass/d2,dist=Math.sqrt(d2);
+                const fx=F*dx/dist,fy=F*dy/dist;
+                a.vx+=fx/a.mass;a.vy+=fy/a.mass;b.vx-=fx/b.mass;b.vy-=fy/b.mass;
+            }
+            a.x+=a.vx;a.y+=a.vy;
+            if(a.x<0||a.x>W)a.vx*=-.8;if(a.y<0||a.y>H)a.vy*=-.8;
+            a.x=Math.max(0,Math.min(W,a.x));a.y=Math.max(0,Math.min(H,a.y));
+        }
+        ctxP.fillStyle='rgba(10,10,26,.3)';ctxP.fillRect(0,0,W,H);
+        for(const b of physicsBodies){ctxP.beginPath();ctxP.arc(b.x,b.y,b.r,0,Math.PI*2);ctxP.fillStyle=b.color;ctxP.fill();}
+        document.getElementById('mPhysBodies').textContent=n;
+    }
+
+    // ── WebGL Particles ──
+    const cGl=document.getElementById('cGl');
+    let gl,glProg,glPosBuffer,glPositions,glVelocities,glParticleCount=30000;
+
+    function initGL(){
+        cGl.width=cGl.clientWidth;cGl.height=cGl.clientHeight;
+        gl=cGl.getContext('webgl',{antialias:false,alpha:false});
+        if(!gl)return;
+        gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+        const vs=`attribute vec2 a;uniform float t;varying vec3 c;void main(){float a2=t*.5+a.x*3.;vec2 p=a+vec2(sin(a2+a.y*10.),cos(a2+a.x*10.))*.1;gl_Position=vec4(p,0,1);gl_PointSize=2.;c=vec3(.4+sin(a.x*5.+t)*.3,.5+cos(a.y*7.+t)*.3,.9);}`;
+        const fs=`precision mediump float;varying vec3 c;void main(){float d=length(gl_PointCoord-.5);if(d>.5)discard;gl_FragColor=vec4(c*(1.-d*2.),(1.-d*2.)*.7);}`;
+        function comp(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s;}
+        glProg=gl.createProgram();gl.attachShader(glProg,comp(gl.VERTEX_SHADER,vs));gl.attachShader(glProg,comp(gl.FRAGMENT_SHADER,fs));gl.linkProgram(glProg);gl.useProgram(glProg);
+        glPosBuffer=gl.createBuffer();
+        glPositions=new Float32Array(glParticleCount*2);glVelocities=new Float32Array(glParticleCount*2);
+        for(let i=0;i<glParticleCount;i++){const a=Math.random()*Math.PI*2,r=Math.random()*.8;
+            glPositions[i*2]=Math.cos(a)*r;glPositions[i*2+1]=Math.sin(a)*r;
+            glVelocities[i*2]=(Math.random()-.5)*.01;glVelocities[i*2+1]=(Math.random()-.5)*.01;}
+        gl.bindBuffer(gl.ARRAY_BUFFER,glPosBuffer);gl.bufferData(gl.ARRAY_BUFFER,glPositions,gl.DYNAMIC_DRAW);
+        const aLoc=gl.getAttribLocation(glProg,'a');gl.enableVertexAttribArray(aLoc);gl.vertexAttribPointer(aLoc,2,gl.FLOAT,false,0,0);
+    }
+
+    function tickGL(time){
+        if(!gl)return;
+        gl.viewport(0,0,cGl.width,cGl.height);
+        for(let i=0;i<glParticleCount;i++){
+            const ix=i*2;glVelocities[ix]+=(Math.random()-.5)*.003;glVelocities[ix+1]+=(Math.random()-.5)*.003;
+            glVelocities[ix]-=glPositions[ix]*.001;glVelocities[ix+1]-=glPositions[ix+1]*.001;
+            glPositions[ix]+=glVelocities[ix];glPositions[ix+1]+=glVelocities[ix+1];
+            glVelocities[ix]*=.999;glVelocities[ix+1]*=.999;
+            if(Math.abs(glPositions[ix])>1){glPositions[ix]*=.9;glVelocities[ix]*=-.5;}
+            if(Math.abs(glPositions[ix+1])>1){glPositions[ix+1]*=.9;glVelocities[ix+1]*=-.5;}
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER,glPosBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,0,glPositions);
+        gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.uniform1f(gl.getUniformLocation(glProg,'t'),time*.001);
+        gl.drawArrays(gl.POINTS,0,glParticleCount);
+        document.getElementById('mGlVerts').textContent=glParticleCount.toLocaleString();
+    }
+
+    // ── Click Storm (auto-simulated) ──
+    const clickArena=document.getElementById('clickArena');
+    let clickTargets=[],clickCount=0;
+    const clickColors=['#f0883e','#f85149','#3fb950','#667eea','#d2a8ff','#ff6b9d'];
+
+    function initClicks(){
+        clickArena.querySelectorAll('.tunnel-target').forEach(e=>e.remove());
+        clickTargets=[];
+        for(let i=0;i<60;i++)spawnTarget();
+    }
+    function spawnTarget(){
+        const sz=Math.random()*20+10;
+        const el=document.createElement('div');
+        el.className='tunnel-target';
+        el.style.cssText=`position:absolute;width:${sz}px;height:${sz}px;border-radius:50%;background:${clickColors[Math.floor(Math.random()*clickColors.length)]};will-change:transform;`;
+        const t={el,x:Math.random()*(clickArena.clientWidth-sz)+sz,y:Math.random()*(clickArena.clientHeight-sz-30)+30,vx:(Math.random()-.5)*3,vy:(Math.random()-.5)*3,sz};
+        el.style.transform=`translate(${t.x}px,${t.y}px)`;
+        clickArena.appendChild(el);clickTargets.push(t);
+    }
+    function tickClicks(){
+        const W=clickArena.clientWidth,H=clickArena.clientHeight;
+        for(const t of clickTargets){
+            t.x+=t.vx*2;t.y+=t.vy*2;
+            if(t.x<0||t.x>W-t.sz)t.vx*=-1;if(t.y<30||t.y>H-t.sz)t.vy*=-1;
+            t.x=Math.max(0,Math.min(W-t.sz,t.x));t.y=Math.max(30,Math.min(H-t.sz,t.y));
+            t.el.style.transform=`translate(${t.x}px,${t.y}px)`;
+            if(Math.random()<.01){t.vx+=(Math.random()-.5)*2;t.vy+=(Math.random()-.5)*2;}
+        }
+        // Auto-click every few frames
+        if(Math.random()<.3&&clickTargets.length>0){
+            const idx=Math.floor(Math.random()*clickTargets.length);
+            clickTargets[idx].el.style.opacity='.3';
+            setTimeout(()=>{if(clickTargets[idx])clickTargets[idx].el.style.opacity='1';},100);
+            clickCount++;if(clickCount%10===0)spawnTarget();
+        }
+        document.getElementById('mDomNodes').textContent=clickTargets.length;
+    }
+
+    // ── Crypto + Data (async background) ──
+    const tLog=document.getElementById('tunnelLog');
+    let dataOps=0,cryptoLayers=0;
+    function tlog(msg){tLog.innerHTML+=msg+'\n';if(tLog.scrollHeight>tLog.clientHeight)tLog.scrollTop=tLog.scrollHeight;}
+
+    async function runCryptoData(){
+        // Data siege
+        tlog('🗄️ Generating 100K records...');
+        const data=[];
+        for(let i=0;i<100000;i++){data.push({id:i,v:Math.random(),s:'x'.repeat(20)});}
+        dataOps++;tlog('✅ Generated. Sorting...');
+        data.sort((a,b)=>a.v-b.v);dataOps++;tlog('✅ Sorted.');
+        await yieldFrame();
+
+        // Crypto layers
+        tlog('🔐 Starting 30-layer Matryoshka...');
+        const payload=new Uint8Array(32*1024);crypto.getRandomValues(payload);
+        let encrypted=payload;const keys=[];
+        for(let L=0;L<30&&!aborted;L++){
+            const key=await crypto.subtle.generateKey({name:'AES-GCM',length:256},true,['encrypt','decrypt']);
+            const iv=crypto.getRandomValues(new Uint8Array(12));
+            const enc=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,encrypted);
+            encrypted=new Uint8Array(enc);keys.push({key,iv});
+            cryptoLayers=L+1;document.getElementById('mCryptoLayers').textContent=cryptoLayers;
+            if(L%5===0){tlog(`  🔒 Layer ${L+1}/30`);await yieldFrame();}
+        }
+        if(!aborted){
+            tlog('✅ Encrypted. Decrypting...');
+            let decrypted=encrypted;
+            for(let L=keys.length-1;L>=0;L--){
+                const{key,iv}=keys[L];
+                decrypted=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv},key,decrypted));
+            }
+            dataOps++;tlog('✅ Decrypted & verified!');
+        }
+        document.getElementById('mDataOps').textContent=dataOps;
+
+        // Loop if still running
+        if(running&&!aborted){tlog('🔄 Repeating...');await runCryptoData();}
+    }
+
+    function yieldFrame(){return new Promise(r=>requestAnimationFrame(r));}
+
+    // ── Main Loop ──
+    function mainLoop(time){
+        if(!running)return;
+        fpsFrames++;const now=performance.now();
+        if(now-lastFpsTime>=500){
+            currentFps=Math.round(fpsFrames*1000/(now-lastFpsTime));fpsFrames=0;lastFpsTime=now;
+            document.getElementById('mFps').textContent=currentFps;
+            const load=Math.min(100,Math.round((1-currentFps/60)*100));
+            document.getElementById('mLoad').textContent=load+'%';
+            const bar=document.getElementById('loadBar');
+            bar.style.width=load+'%';
+            bar.style.background=currentFps>=50?'#3fb950':currentFps>=30?'#d29922':currentFps>=10?'#f85149':'#ff0000';
+            document.getElementById('mFps').style.color=bar.style.background;
+            // Breach detection
+            const overlay=document.getElementById('breachOverlay');
+            overlay.classList.toggle('active',currentFps<10);
+        }
+        document.getElementById('mElapsed').textContent=((now-startTime)/1000).toFixed(0)+'s';
+        ['fpPhys','fpGl','fpClicks','fpCrypto'].forEach(id=>{
+            const el=document.getElementById(id);el.textContent=currentFps+'fps';
+            el.style.color=currentFps>=50?'#3fb950':currentFps>=30?'#d29922':'#f85149';
+        });
+
+        tickPhysics();tickGL(time);tickClicks();
+        requestAnimationFrame(mainLoop);
+    }
+
+    function startBreach(){
+        if(running)return;running=true;aborted=false;startTime=performance.now();
+        fpsFrames=0;lastFpsTime=performance.now();dataOps=0;cryptoLayers=0;clickCount=0;
+        tLog.innerHTML='';
+        document.getElementById('btnBreach').disabled=true;document.getElementById('btnAbort').disabled=false;
+        initPhysics();initGL();initClicks();
+        requestAnimationFrame(mainLoop);
+        runCryptoData();
+    }
+    function stopBreach(){
+        running=false;aborted=true;
+        document.getElementById('btnBreach').disabled=false;document.getElementById('btnAbort').disabled=true;
+        document.getElementById('breachOverlay').classList.remove('active');
+        if(isAuto&&_bench){
+            _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps*2));
+            history.pushState({},'','/benchmark');
+            dispatchEvent(new PopStateEvent('popstate'));
+        }
+    }
+
+    document.getElementById('btnBreach').onclick=startBreach;
+    document.getElementById('btnAbort').onclick=stopBreach;
+
+    if(isAuto){startBreach();setTimeout(stopBreach,duration*1000);}
+})();
+</script>

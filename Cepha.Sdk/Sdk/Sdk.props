@@ -1,0 +1,53 @@
+<Project>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       🧬 Cepha SDK v1.0 — Sdk.props
+       Physarum polycephalum — Auto-imported FIRST
+       ═══════════════════════════════════════════════════════════ -->
+
+  <!-- ─── CephaMode: Client (browser SPA) or Server (Node.js WASM) ─── -->
+  <PropertyGroup>
+    <CephaMode      Condition="'$(CephaMode)' == ''">Client</CephaMode>
+    <_CephaIsClient Condition="'$(CephaMode)' == 'Client'">true</_CephaIsClient>
+    <_CephaIsServer Condition="'$(CephaMode)' == 'Server'">true</_CephaIsServer>
+    <CephaVersion>1.0.0</CephaVersion>
+  </PropertyGroup>
+
+  <!-- ─── Import base .NET SDK props ─── -->
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk.WebAssembly" Condition="'$(_CephaIsClient)' == 'true'" />
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk"              Condition="'$(_CephaIsServer)' == 'true'" />
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Default Properties — sensible defaults, all overridable
+       ═══════════════════════════════════════════════════════════ -->
+  <PropertyGroup>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net10.0</TargetFramework>
+    <Nullable        Condition="'$(Nullable)'        == ''">enable</Nullable>
+    <ImplicitUsings  Condition="'$(ImplicitUsings)'  == ''">enable</ImplicitUsings>
+    <!-- Required for JSImport/JSExport WASM interop -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Required: EF Core relies on reflection -->
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+
+  <!-- ─── Client-specific ─── -->
+  <PropertyGroup Condition="'$(_CephaIsClient)' == 'true'">
+    <OverrideHtmlAssetPlaceholders Condition="'$(OverrideHtmlAssetPlaceholders)' == ''">true</OverrideHtmlAssetPlaceholders>
+  </PropertyGroup>
+
+  <!-- ─── Server-specific ─── -->
+  <PropertyGroup Condition="'$(_CephaIsServer)' == 'true'">
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">browser-wasm</RuntimeIdentifier>
+    <OutputType         Condition="'$(OutputType)'         == ''">Exe</OutputType>
+    <WasmMainJSPath     Condition="'$(WasmMainJSPath)'     == ''">main.mjs</WasmMainJSPath>
+  </PropertyGroup>
+
+  <!-- ─── Deployment channel flags ─── -->
+  <PropertyGroup>
+    <CephaDeployLocal      Condition="'$(CephaDeployLocal)'      == ''">true</CephaDeployLocal>
+    <CephaDeployCloudflare Condition="'$(CephaDeployCloudflare)' == ''">false</CephaDeployCloudflare>
+    <CephaDeployAzure      Condition="'$(CephaDeployAzure)'      == ''">false</CephaDeployAzure>
+    <CephaServerPort       Condition="'$(CephaServerPort)'       == ''">3000</CephaServerPort>
+  </PropertyGroup>
+
+</Project>

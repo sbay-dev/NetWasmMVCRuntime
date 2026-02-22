@@ -1,0 +1,149 @@
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<style>
+.phys-canvas{width:100%;height:520px;background:#0a0a1a;border-radius:8px;border:1px solid #333;display:block}
+.phys-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.phys-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.phys-ctrl input[type=range]{width:110px;accent-color:#d2a8ff}
+.phys-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.phys-metric{text-align:center}.phys-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.phys-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+</style>
+<div id="bench-root"></div>
+
+<script>
+(function(){
+const h = React.createElement;
+const {useState, useEffect, useRef, useCallback} = React;
+const _bench = window.__cephaBench;
+const isAuto = _bench && _bench.active;
+const duration = (_bench && _bench.duration) || 8;
+const pColors=['#667eea','#f0883e','#3fb950','#f85149','#d2a8ff','#79c0ff','#d29922','#ff6b9d','#00d4aa','#e0e0e0'];
+
+function App(){
+    const [ctrlBodies, setCtrlBodies] = useState(500);
+    const [ctrlGravity, setCtrlGravity] = useState(30);
+    const [running, setRunning] = useState(false);
+    const [metrics, setMetrics] = useState({fps:0,bodies:0,interactions:0,gForce:0});
+    const canvasRef = useRef(null);
+    const stateRef = useRef({running:false,bodies:[],fps:60,frames:0,lastFpsTime:0,collisions:0});
+    const animRef = useRef(null);
+
+    const initBodies = useCallback((n,W,H)=>{
+        const bodies=[];
+        for(let i=0;i<n;i++){
+            bodies.push({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*2,vy:(Math.random()-.5)*2,
+                mass:Math.random()*3+.5,r:Math.random()*2.5+1,color:pColors[i%pColors.length]});
+        }
+        return bodies;
+    },[]);
+
+    const tick = useCallback(()=>{
+        const s=stateRef.current;
+        if(!s.running) return;
+        const canvas=canvasRef.current; if(!canvas) return;
+        const ctx=canvas.getContext('2d');
+        const W=canvas.width,H=canvas.height,n=s.bodies.length;
+        const G=s.gravity*.0001, dt=1;
+        let calcs=0,kE=0;
+
+        for(let i=0;i<n;i++){
+            const a=s.bodies[i];
+            for(let j=i+1;j<n;j++){
+                const b=s.bodies[j];
+                const dx=b.x-a.x,dy=b.y-a.y,d2=dx*dx+dy*dy+1;
+                const F=G*a.mass*b.mass/d2,dist=Math.sqrt(d2);
+                const fx=F*dx/dist,fy=F*dy/dist;
+                a.vx+=fx/a.mass*dt;a.vy+=fy/a.mass*dt;
+                b.vx-=fx/b.mass*dt;b.vy-=fy/b.mass*dt;
+                calcs++;
+                if(dist<a.r+b.r+2){
+                    s.collisions++;
+                    const nx=dx/dist,ny=dy/dist,dvx=a.vx-b.vx,dvy=a.vy-b.vy,dvn=dvx*nx+dvy*ny;
+                    if(dvn>0){const imp=2*dvn/(a.mass+b.mass);a.vx-=imp*b.mass*nx;a.vy-=imp*b.mass*ny;b.vx+=imp*a.mass*nx;b.vy+=imp*a.mass*ny;}
+                }
+            }
+        }
+
+        for(const b of s.bodies){
+            b.x+=b.vx*dt;b.y+=b.vy*dt;
+            if(b.x<0){b.x=0;b.vx*=-.8;}if(b.x>W){b.x=W;b.vx*=-.8;}
+            if(b.y<0){b.y=0;b.vy*=-.8;}if(b.y>H){b.y=H;b.vy*=-.8;}
+            kE+=.5*b.mass*(b.vx*b.vx+b.vy*b.vy);
+        }
+
+        ctx.fillStyle='rgba(10,10,26,0.8)';
+        ctx.fillRect(0,0,W,H);
+        for(const b of s.bodies){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fillStyle=b.color;ctx.fill();}
+
+        const now=performance.now();
+        s.frames++;
+        if(now-s.lastFpsTime>=500){
+            s.fps=Math.round(s.frames*1000/(now-s.lastFpsTime));
+            s.frames=0;s.lastFpsTime=now;
+        }
+        setMetrics({fps:s.fps,bodies:n,interactions:calcs,gForce:Math.round(kE)});
+        animRef.current=requestAnimationFrame(tick);
+    },[]);
+
+    const start = useCallback(()=>{
+        const canvas=canvasRef.current; if(!canvas) return;
+        canvas.width=canvas.clientWidth;canvas.height=canvas.clientHeight;
+        const s=stateRef.current;
+        s.bodies=initBodies(ctrlBodies,canvas.width,canvas.height);
+        s.gravity=ctrlGravity;s.collisions=0;s.frames=0;s.lastFpsTime=performance.now();s.fps=60;s.running=true;
+        setRunning(true);
+        animRef.current=requestAnimationFrame(tick);
+    },[ctrlBodies,ctrlGravity,initBodies,tick]);
+
+    const stop = useCallback(()=>{
+        stateRef.current.running=false;
+        setRunning(false);
+        if(animRef.current) cancelAnimationFrame(animRef.current);
+        const s=stateRef.current;
+        const particles=s.bodies.length;
+        const score=Math.min(100,Math.round(s.fps*1.6+(particles>3000?20:10)));
+        if(_bench&&_bench.active){
+            if(_bench.battleMode&&_bench.recordScore)_bench.recordScore('physics',score);
+            else _bench.scores['physics']=score;
+            _bench.next();
+        }
+    },[]);
+
+    useEffect(()=>{stateRef.current.gravity=ctrlGravity;},[ctrlGravity]);
+
+    useEffect(()=>{
+        if(isAuto){setTimeout(()=>{
+            const canvas=canvasRef.current;if(!canvas)return;
+            canvas.width=canvas.clientWidth;canvas.height=canvas.clientHeight;
+            const s=stateRef.current;
+            s.bodies=initBodies(500,canvas.width,canvas.height);
+            s.gravity=30;s.collisions=0;s.frames=0;s.lastFpsTime=performance.now();s.fps=60;s.running=true;
+            setRunning(true);animRef.current=requestAnimationFrame(tick);
+            setTimeout(stop,duration*1000);
+        },50);}
+        return()=>{if(animRef.current)cancelAnimationFrame(animRef.current);};
+    },[]);
+
+    const fpsColor=metrics.fps>=50?'#3fb950':metrics.fps>=30?'#d29922':'#f85149';
+
+    return h('div',{style:{maxWidth:'1200px',margin:'0 auto'}},
+        h('div',{style:{background:'linear-gradient(135deg,#61dafb,#282c34)',color:'#fff',padding:'6px 16px',borderRadius:'8px',marginBottom:'10px',fontWeight:'bold',fontSize:'.85rem',display:'flex',alignItems:'center',gap:'8px'}},'⚛️ React 18 — Virtual DOM + Hooks'),
+        h('h2',{style:{margin:'8px 0',fontSize:'1.2rem'}},'🌌 Particle Physics — N-body gravity simulation'),
+        h('div',{className:'phys-ctrl'},
+            h('div',null,h('label',null,'Bodies'),h('br'),h('input',{type:'range',min:50,max:5000,step:50,value:ctrlBodies,onChange:e=>setCtrlBodies(+e.target.value)}),h('span',{style:{color:'#d2a8ff',fontWeight:'bold',marginLeft:'4px'}},ctrlBodies)),
+            h('div',null,h('label',null,'Gravity'),h('br'),h('input',{type:'range',min:1,max:100,value:ctrlGravity,onChange:e=>setCtrlGravity(+e.target.value)}),h('span',{style:{color:'#d2a8ff',fontWeight:'bold',marginLeft:'4px'}},ctrlGravity)),
+            h('button',{style:{padding:'6px 16px',border:'none',borderRadius:'6px',background:'#28a745',color:'#fff',fontWeight:'bold',cursor:'pointer'},onClick:start,disabled:running},'▶ START'),
+            h('button',{style:{padding:'6px 16px',border:'none',borderRadius:'6px',background:'#dc3545',color:'#fff',fontWeight:'bold',cursor:'pointer'},onClick:stop,disabled:!running},'⏹ STOP')
+        ),
+        h('div',{className:'phys-metrics'},
+            h('div',{className:'phys-metric'},h('div',{className:'num',style:{color:fpsColor}},metrics.fps),h('div',{className:'lbl'},'FPS')),
+            h('div',{className:'phys-metric'},h('div',{className:'num',style:{color:'#d2a8ff'}},metrics.bodies),h('div',{className:'lbl'},'Particles')),
+            h('div',{className:'phys-metric'},h('div',{className:'num',style:{color:'#79c0ff'}},metrics.interactions.toLocaleString()),h('div',{className:'lbl'},'Interactions/frame')),
+            h('div',{className:'phys-metric'},h('div',{className:'num',style:{color:'#e0e0e0'}},metrics.gForce),h('div',{className:'lbl'},'G-Force'))
+        ),
+        h('canvas',{ref:canvasRef,className:'phys-canvas'})
+    );
+}
+
+ReactDOM.createRoot(document.getElementById('bench-root')).render(h(App));
+})();
+</script>

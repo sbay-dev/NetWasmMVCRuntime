@@ -1,0 +1,184 @@
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+.storm-arena{position:relative;width:100%;height:500px;overflow:hidden;background:#0a0a1a;border-radius:8px;border:1px solid #333;cursor:crosshair}
+.storm-target{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;cursor:pointer;user-select:none;will-change:transform;transition:none}
+.storm-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.storm-metric{text-align:center}.storm-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.storm-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+.storm-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.storm-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.storm-ctrl input[type=range]{width:120px;accent-color:#f0883e}
+.storm-btn{padding:6px 16px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:.8rem}
+.vue-banner{background:linear-gradient(135deg,#42b883,#35495e);color:#fff;padding:6px 16px;border-radius:8px;margin-bottom:10px;font-weight:bold;font-size:.85rem;display:flex;align-items:center;gap:8px}
+</style>
+<div id="bench-root"></div>
+
+<script>
+(function(){
+const{createApp,ref,computed,onMounted,onUnmounted,reactive}=Vue;
+const _bench=window.__cephaBench;
+const isAuto=_bench&&_bench.active;
+const duration=(_bench&&_bench.duration)||8;
+const colors=['#f0883e','#f85149','#3fb950','#667eea','#d2a8ff','#79c0ff','#e0e0e0','#d29922','#ff6b9d','#00d4aa'];
+
+createApp({
+    setup(){
+        const ctrlTargets=ref(50);
+        const ctrlMoveSpeed=ref(60);
+        const ctrlSpawn=ref(3);
+        const running=ref(false);
+        const targets=ref([]);
+        const hits=ref(0);
+        const misses=ref(0);
+        const totalClicks=ref(0);
+        const currentFps=ref(0);
+        const eventsPerSec=ref(0);
+        const latencies=reactive([]);
+        let animId=null,frames=0,lastFpsTime=0,eventsThisSec=0,lastEvTime=0;
+        let nextId=0;
+
+        const avgLatency=computed(()=>latencies.length?Math.round(latencies.reduce((a,b)=>a+b,0)/latencies.length):0);
+        const accuracy=computed(()=>totalClicks.value>0?Math.round(hits.value/totalClicks.value*100)+'%':'0%');
+        const fpsColor=computed(()=>currentFps.value>=50?'#3fb950':currentFps.value>=30?'#d29922':'#f85149');
+
+        function createTarget(x,y,sz){
+            sz=sz||Math.random()*30+14;
+            const t=reactive({
+                id:nextId++,x:x??0,y:y??0,vx:(Math.random()-.5)*4,vy:(Math.random()-.5)*4,
+                sz,color:colors[Math.floor(Math.random()*colors.length)],dead:false,
+                opacity:1,scale:1,lastRender:performance.now()
+            });
+            // Defer position until arena is known
+            t._needsInit=x==null;
+            t._initSz=sz;
+            targets.value.push(t);
+            return t;
+        }
+
+        function onTargetDown(e,t){
+            e.preventDefault();e.stopPropagation();
+            const lat=performance.now()-t.lastRender;
+            latencies.push(lat);hits.value++;totalClicks.value++;eventsThisSec++;
+            const spawn=ctrlSpawn.value;
+            for(let i=0;i<spawn;i++)createTarget(t.x+Math.random()*40-20,t.y+Math.random()*40-20,t.sz*.7);
+            t.scale=1.5;t.opacity=0;
+            setTimeout(()=>{t.dead=true;},150);
+        }
+
+        function onArenaMiss(){
+            misses.value++;totalClicks.value++;eventsThisSec++;
+        }
+
+        function init(){
+            targets.value=[];hits.value=0;misses.value=0;totalClicks.value=0;latencies.length=0;nextId=0;
+            const c=ctrlTargets.value;
+            for(let i=0;i<c;i++)createTarget();
+        }
+
+        function tick(now){
+            if(!running.value)return;
+            const arena=document.getElementById('vue-arena');
+            if(!arena){animId=requestAnimationFrame(tick);return;}
+            const W=arena.clientWidth,H=arena.clientHeight;
+            const spd=ctrlMoveSpeed.value/60;
+
+            // Init positions for targets that need it
+            for(const t of targets.value){
+                if(t._needsInit){t.x=Math.random()*(W-t._initSz);t.y=Math.random()*(H-t._initSz);t._needsInit=false;}
+            }
+
+            // Remove dead
+            targets.value=targets.value.filter(t=>!t.dead);
+
+            for(const t of targets.value){
+                t.x+=t.vx*spd;t.y+=t.vy*spd;
+                if(t.x<0||t.x>W-t.sz)t.vx*=-1;
+                if(t.y<0||t.y>H-t.sz)t.vy*=-1;
+                t.x=Math.max(0,Math.min(W-t.sz,t.x));
+                t.y=Math.max(0,Math.min(H-t.sz,t.y));
+                t.lastRender=now;
+                if(Math.random()<.02){t.vx+=(Math.random()-.5)*2;t.vy+=(Math.random()-.5)*2;}
+            }
+
+            // Respawn to maintain count
+            while(targets.value.length<ctrlTargets.value)createTarget();
+
+            frames++;
+            if(now-lastFpsTime>=500){
+                currentFps.value=Math.round(frames*1000/(now-lastFpsTime));
+                frames=0;lastFpsTime=now;
+            }
+            if(now-lastEvTime>=1000){
+                eventsPerSec.value=eventsThisSec;eventsThisSec=0;lastEvTime=now;
+            }
+            animId=requestAnimationFrame(tick);
+        }
+
+        function start(){
+            running.value=true;init();frames=0;lastFpsTime=performance.now();lastEvTime=performance.now();
+            animId=requestAnimationFrame(tick);
+        }
+        function stop(){
+            running.value=false;if(animId)cancelAnimationFrame(animId);
+            if(isAuto&&_bench){
+                const score=Math.min(100,Math.round(currentFps.value*1.5+(latencies.length?Math.max(0,100-latencies.reduce((a,b)=>a+b,0)/latencies.length):0)));
+                _bench.scores[_bench.currentTest]=score;
+                history.pushState({},'','/benchmark');
+                dispatchEvent(new PopStateEvent('popstate'));
+            }
+        }
+
+        onMounted(()=>{
+            if(isAuto){
+                start();
+                const clickIv=setInterval(()=>{
+                    if(!running.value)return;
+                    for(let i=0;i<5;i++){
+                        const alive=targets.value.filter(t=>!t.dead);
+                        if(alive.length){
+                            const t=alive[Math.floor(Math.random()*alive.length)];
+                            const lat=performance.now()-t.lastRender;
+                            latencies.push(lat);hits.value++;totalClicks.value++;eventsThisSec++;
+                            const spawn=ctrlSpawn.value;
+                            for(let s=0;s<spawn;s++)createTarget(t.x+Math.random()*40-20,t.y+Math.random()*40-20,t.sz*.7);
+                            t.scale=1.5;t.opacity=0;
+                            setTimeout(()=>{t.dead=true;},150);
+                        }
+                    }
+                },50);
+                setTimeout(()=>{clearInterval(clickIv);stop();},duration*1000);
+            }
+        });
+
+        return{ctrlTargets,ctrlMoveSpeed,ctrlSpawn,running,targets,hits,misses,totalClicks,
+            currentFps,eventsPerSec,avgLatency,accuracy,fpsColor,onTargetDown,onArenaMiss,start,stop};
+    },
+    template:`
+<div style="max-width:1200px;margin:0 auto;">
+    <div class="vue-banner">🟢 Vue 3 <span style="font-weight:normal;font-size:.75rem;">— Composition API + Reactive Proxy</span></div>
+    <h2 style="margin:8px 0;font-size:1.2rem;">🎯 Click Storm — Hit the moving targets</h2>
+    <div class="storm-ctrl">
+        <div><label>Targets</label><br><input type="range" v-model.number="ctrlTargets" min="20" max="500"><span style="color:#f0883e;font-weight:bold;margin-left:4px">{{ctrlTargets}}</span></div>
+        <div><label>Speed</label><br><input type="range" v-model.number="ctrlMoveSpeed" min="1" max="200"><span style="color:#f0883e;font-weight:bold;margin-left:4px">{{ctrlMoveSpeed}}</span></div>
+        <div><label>Spawn on Click</label><br><input type="range" v-model.number="ctrlSpawn" min="0" max="10"><span style="color:#f0883e;font-weight:bold;margin-left:4px">{{ctrlSpawn}}</span></div>
+        <button class="storm-btn" style="background:#28a745;color:#fff;" @click="start" :disabled="running">▶ START</button>
+        <button class="storm-btn" style="background:#dc3545;color:#fff;" @click="stop" :disabled="!running">⏹ STOP</button>
+    </div>
+    <div class="storm-metrics">
+        <div class="storm-metric"><div class="num" :style="{color:fpsColor}">{{currentFps}}</div><div class="lbl">FPS</div></div>
+        <div class="storm-metric"><div class="num" style="color:#f0883e">{{hits}}</div><div class="lbl">Hits</div></div>
+        <div class="storm-metric"><div class="num" style="color:#f85149">{{misses}}</div><div class="lbl">Misses</div></div>
+        <div class="storm-metric"><div class="num" style="color:#79c0ff">{{avgLatency}}</div><div class="lbl">Avg Latency ms</div></div>
+        <div class="storm-metric"><div class="num" style="color:#d2a8ff">{{eventsPerSec}}</div><div class="lbl">Events/sec</div></div>
+        <div class="storm-metric"><div class="num" style="color:#667eea">{{targets.length}}</div><div class="lbl">Active Targets</div></div>
+        <div class="storm-metric"><div class="num" style="color:#e0e0e0">{{totalClicks}}</div><div class="lbl">Total Clicks</div></div>
+        <div class="storm-metric"><div class="num" style="color:#3fb950">{{accuracy}}</div><div class="lbl">Accuracy</div></div>
+    </div>
+    <div class="storm-arena" id="vue-arena" @pointerdown.self="onArenaMiss">
+        <div v-for="t in targets" :key="t.id" class="storm-target"
+            :style="{width:t.sz+'px',height:t.sz+'px',background:t.color,fontSize:Math.max(8,t.sz*.35)+'px',color:'#fff',
+                transform:'translate('+t.x+'px,'+t.y+'px) scale('+t.scale+')',opacity:t.opacity}"
+            @pointerdown.stop.prevent="onTargetDown($event,t)">●</div>
+    </div>
+</div>`
+}).mount('#bench-root');
+})();
+</script>

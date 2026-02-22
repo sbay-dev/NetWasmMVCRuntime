@@ -1,0 +1,299 @@
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+.tunnel-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.tunnel-cell{background:#0a0a1a;border:1px solid #333;border-radius:8px;overflow:hidden;position:relative;min-height:240px}
+.tunnel-cell canvas{width:100%;height:100%;display:block}
+.tunnel-cell-label{position:absolute;top:6px;left:8px;font-size:.7rem;font-weight:bold;padding:2px 8px;background:rgba(0,0,0,.7);border-radius:4px;z-index:1}
+.tunnel-cell-fps{position:absolute;top:6px;right:8px;font-size:.8rem;font-weight:bold;font-family:monospace;z-index:1}
+.tunnel-hud{padding:12px;background:linear-gradient(135deg,#0d1117,#1a1a2e);border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.tunnel-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px}
+.tunnel-metric{text-align:center}.tunnel-metric .num{font-size:1.3rem;font-weight:bold;font-family:monospace}.tunnel-metric .lbl{font-size:.55rem;color:#8b949e;text-transform:uppercase}
+.tunnel-bar{height:20px;background:#30363d;border-radius:10px;overflow:hidden;margin-top:8px}
+.tunnel-bar-fill{height:100%;transition:width .3s ease;border-radius:10px}
+.tunnel-target-vue{position:absolute;border-radius:50%;will-change:transform}
+.breach-alert{display:none;position:fixed;inset:0;background:rgba(248,81,73,.15);z-index:9998;pointer-events:none}
+.breach-alert.active{display:block;animation:breachPulse 1s ease infinite}
+@keyframes breachPulse{0%,100%{opacity:.15}50%{opacity:.3}}
+.vue-banner{background:linear-gradient(135deg,#42b883,#35495e);color:#fff;padding:6px 16px;border-radius:8px;margin-bottom:10px;font-weight:bold;font-size:.85rem;display:flex;align-items:center;gap:8px}
+</style>
+<div id="bench-root"></div>
+
+<script>
+(function(){
+const{createApp,ref,computed,onMounted,reactive,nextTick}=Vue;
+const _bench=window.__cephaBench;
+const isAuto=_bench&&_bench.active;
+const duration=(_bench&&_bench.duration)||8;
+
+createApp({
+    setup(){
+        const running=ref(false);
+        const aborted=ref(false);
+        const currentFps=ref(0);
+        const threadLoad=ref('0%');
+        const physBodies=ref(0);
+        const glVerts=ref('0');
+        const domNodes=ref(0);
+        const dataOps=ref(0);
+        const cryptoLayers=ref(0);
+        const elapsedStr=ref('0s');
+        const loadBarWidth=ref('0%');
+        const loadBarColor=ref('#3fb950');
+        const breachActive=ref(false);
+        const fpsDisplay=ref('--');
+        const fpsDisplayColor=ref('#3fb950');
+        const clickTargets=ref([]);
+        const logLines=ref([]);
+        let fpsFrames=0,lastFpsTime=0,startTime=0;
+        let physicsBodiesArr=[],clickCount=0;
+        let gl,glProg,glPosBuffer,glPositions,glVelocities,glParticleCount=30000;
+        const physColors=['#667eea','#f0883e','#3fb950','#f85149','#d2a8ff','#79c0ff'];
+        const clickColors=['#f0883e','#f85149','#3fb950','#667eea','#d2a8ff','#ff6b9d'];
+        let nextTargetId=0;
+
+        function tlog(msg){logLines.value.push(msg);nextTick(()=>{const el=document.getElementById('vueTunnelLog');if(el)el.scrollTop=el.scrollHeight;});}
+
+        // ── Physics ──
+        function initPhysics(){
+            const c=document.getElementById('cPhysVue');if(!c)return;
+            c.width=c.clientWidth;c.height=c.clientHeight;
+            physicsBodiesArr=[];
+            for(let i=0;i<800;i++){
+                physicsBodiesArr.push({x:Math.random()*c.width,y:Math.random()*c.height,
+                    vx:(Math.random()-.5)*3,vy:(Math.random()-.5)*3,mass:Math.random()*2+.5,
+                    r:Math.random()*2+1,color:physColors[i%physColors.length]});
+            }
+        }
+        function tickPhysics(){
+            const c=document.getElementById('cPhysVue');if(!c)return;
+            const ctx=c.getContext('2d');
+            const W=c.width,H=c.height,n=physicsBodiesArr.length;
+            for(let i=0;i<n;i++){
+                const a=physicsBodiesArr[i];
+                for(let j=i+1;j<Math.min(i+50,n);j++){
+                    const b=physicsBodiesArr[j];
+                    const dx=b.x-a.x,dy=b.y-a.y,d2=dx*dx+dy*dy+1;
+                    const F=.0003*a.mass*b.mass/d2,dist=Math.sqrt(d2);
+                    const fx=F*dx/dist,fy=F*dy/dist;
+                    a.vx+=fx/a.mass;a.vy+=fy/a.mass;b.vx-=fx/b.mass;b.vy-=fy/b.mass;
+                }
+                a.x+=a.vx;a.y+=a.vy;
+                if(a.x<0||a.x>W)a.vx*=-.8;if(a.y<0||a.y>H)a.vy*=-.8;
+                a.x=Math.max(0,Math.min(W,a.x));a.y=Math.max(0,Math.min(H,a.y));
+            }
+            ctx.fillStyle='rgba(10,10,26,.3)';ctx.fillRect(0,0,W,H);
+            for(const b of physicsBodiesArr){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fillStyle=b.color;ctx.fill();}
+            physBodies.value=n;
+        }
+
+        // ── WebGL ──
+        function initGL(){
+            const c=document.getElementById('cGlVue');if(!c)return;
+            c.width=c.clientWidth;c.height=c.clientHeight;
+            gl=c.getContext('webgl',{antialias:false,alpha:false});
+            if(!gl)return;
+            gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+            const vs=`attribute vec2 a;uniform float t;varying vec3 c;void main(){float a2=t*.5+a.x*3.;vec2 p=a+vec2(sin(a2+a.y*10.),cos(a2+a.x*10.))*.1;gl_Position=vec4(p,0,1);gl_PointSize=2.;c=vec3(.4+sin(a.x*5.+t)*.3,.5+cos(a.y*7.+t)*.3,.9);}`;
+            const fs=`precision mediump float;varying vec3 c;void main(){float d=length(gl_PointCoord-.5);if(d>.5)discard;gl_FragColor=vec4(c*(1.-d*2.),(1.-d*2.)*.7);}`;
+            function comp(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s;}
+            glProg=gl.createProgram();gl.attachShader(glProg,comp(gl.VERTEX_SHADER,vs));gl.attachShader(glProg,comp(gl.FRAGMENT_SHADER,fs));gl.linkProgram(glProg);gl.useProgram(glProg);
+            glPosBuffer=gl.createBuffer();
+            glPositions=new Float32Array(glParticleCount*2);glVelocities=new Float32Array(glParticleCount*2);
+            for(let i=0;i<glParticleCount;i++){const a=Math.random()*Math.PI*2,r=Math.random()*.8;
+                glPositions[i*2]=Math.cos(a)*r;glPositions[i*2+1]=Math.sin(a)*r;
+                glVelocities[i*2]=(Math.random()-.5)*.01;glVelocities[i*2+1]=(Math.random()-.5)*.01;}
+            gl.bindBuffer(gl.ARRAY_BUFFER,glPosBuffer);gl.bufferData(gl.ARRAY_BUFFER,glPositions,gl.DYNAMIC_DRAW);
+            const aLoc=gl.getAttribLocation(glProg,'a');gl.enableVertexAttribArray(aLoc);gl.vertexAttribPointer(aLoc,2,gl.FLOAT,false,0,0);
+        }
+        function tickGL(time){
+            if(!gl)return;
+            const c=document.getElementById('cGlVue');if(!c)return;
+            gl.viewport(0,0,c.width,c.height);
+            for(let i=0;i<glParticleCount;i++){
+                const ix=i*2;glVelocities[ix]+=(Math.random()-.5)*.003;glVelocities[ix+1]+=(Math.random()-.5)*.003;
+                glVelocities[ix]-=glPositions[ix]*.001;glVelocities[ix+1]-=glPositions[ix+1]*.001;
+                glPositions[ix]+=glVelocities[ix];glPositions[ix+1]+=glVelocities[ix+1];
+                glVelocities[ix]*=.999;glVelocities[ix+1]*=.999;
+                if(Math.abs(glPositions[ix])>1){glPositions[ix]*=.9;glVelocities[ix]*=-.5;}
+                if(Math.abs(glPositions[ix+1])>1){glPositions[ix+1]*=.9;glVelocities[ix+1]*=-.5;}
+            }
+            gl.bindBuffer(gl.ARRAY_BUFFER,glPosBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,0,glPositions);
+            gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.uniform1f(gl.getUniformLocation(glProg,'t'),time*.001);
+            gl.drawArrays(gl.POINTS,0,glParticleCount);
+            glVerts.value=glParticleCount.toLocaleString();
+        }
+
+        // ── Click Storm (Vue-managed targets) ──
+        function initClicks(){
+            clickTargets.value=[];nextTargetId=0;
+            const arena=document.getElementById('clickArenaVue');
+            if(!arena)return;
+            for(let i=0;i<60;i++)spawnTarget(arena);
+        }
+        function spawnTarget(arena){
+            if(!arena)arena=document.getElementById('clickArenaVue');
+            if(!arena)return;
+            const sz=Math.random()*20+10;
+            clickTargets.value.push(reactive({
+                id:nextTargetId++,x:Math.random()*(arena.clientWidth-sz)+sz,
+                y:Math.random()*(arena.clientHeight-sz-30)+30,
+                vx:(Math.random()-.5)*3,vy:(Math.random()-.5)*3,sz,
+                color:clickColors[Math.floor(Math.random()*clickColors.length)],opacity:1
+            }));
+        }
+        function tickClicks(){
+            const arena=document.getElementById('clickArenaVue');
+            if(!arena)return;
+            const W=arena.clientWidth,H=arena.clientHeight;
+            for(const t of clickTargets.value){
+                t.x+=t.vx*2;t.y+=t.vy*2;
+                if(t.x<0||t.x>W-t.sz)t.vx*=-1;if(t.y<30||t.y>H-t.sz)t.vy*=-1;
+                t.x=Math.max(0,Math.min(W-t.sz,t.x));t.y=Math.max(30,Math.min(H-t.sz,t.y));
+                if(Math.random()<.01){t.vx+=(Math.random()-.5)*2;t.vy+=(Math.random()-.5)*2;}
+            }
+            // Auto-click
+            if(Math.random()<.3&&clickTargets.value.length>0){
+                const idx=Math.floor(Math.random()*clickTargets.value.length);
+                clickTargets.value[idx].opacity=.3;
+                setTimeout(()=>{if(clickTargets.value[idx])clickTargets.value[idx].opacity=1;},100);
+                clickCount++;if(clickCount%10===0)spawnTarget();
+            }
+            domNodes.value=clickTargets.value.length;
+        }
+
+        // ── Crypto + Data ──
+        function yieldFrame(){return new Promise(r=>requestAnimationFrame(r));}
+        async function runCryptoData(){
+            tlog('🗄️ Generating 100K records...');
+            const data=[];
+            for(let i=0;i<100000;i++){data.push({id:i,v:Math.random(),s:'x'.repeat(20)});}
+            dataOps.value++;tlog('✅ Generated. Sorting...');
+            data.sort((a,b)=>a.v-b.v);dataOps.value++;tlog('✅ Sorted.');
+            await yieldFrame();
+
+            tlog('🔐 Starting 30-layer Matryoshka...');
+            const payload=new Uint8Array(32*1024);crypto.getRandomValues(payload);
+            let encrypted=payload;const keys=[];
+            for(let L=0;L<30&&!aborted.value;L++){
+                const key=await crypto.subtle.generateKey({name:'AES-GCM',length:256},true,['encrypt','decrypt']);
+                const iv=crypto.getRandomValues(new Uint8Array(12));
+                const enc=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,encrypted);
+                encrypted=new Uint8Array(enc);keys.push({key,iv});
+                cryptoLayers.value=L+1;
+                if(L%5===0){tlog(`  🔒 Layer ${L+1}/30`);await yieldFrame();}
+            }
+            if(!aborted.value){
+                tlog('✅ Encrypted. Decrypting...');
+                let decrypted=encrypted;
+                for(let L=keys.length-1;L>=0;L--){
+                    const{key,iv}=keys[L];
+                    decrypted=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv},key,decrypted));
+                }
+                dataOps.value++;tlog('✅ Decrypted & verified!');
+            }
+
+            if(running.value&&!aborted.value){tlog('🔄 Repeating...');await runCryptoData();}
+        }
+
+        // ── Main Loop ──
+        function mainLoop(time){
+            if(!running.value)return;
+            fpsFrames++;const now=performance.now();
+            if(now-lastFpsTime>=500){
+                currentFps.value=Math.round(fpsFrames*1000/(now-lastFpsTime));fpsFrames=0;lastFpsTime=now;
+                const load=Math.min(100,Math.round((1-currentFps.value/60)*100));
+                threadLoad.value=load+'%';
+                loadBarWidth.value=load+'%';
+                loadBarColor.value=currentFps.value>=50?'#3fb950':currentFps.value>=30?'#d29922':currentFps.value>=10?'#f85149':'#ff0000';
+                fpsDisplayColor.value=loadBarColor.value;
+                fpsDisplay.value=currentFps.value+'fps';
+                breachActive.value=currentFps.value<10;
+            }
+            elapsedStr.value=((now-startTime)/1000).toFixed(0)+'s';
+
+            tickPhysics();tickGL(time);tickClicks();
+            requestAnimationFrame(mainLoop);
+        }
+
+        function startBreach(){
+            if(running.value)return;running.value=true;aborted.value=false;
+            startTime=performance.now();fpsFrames=0;lastFpsTime=performance.now();
+            dataOps.value=0;cryptoLayers.value=0;clickCount=0;logLines.value=[];
+            initPhysics();initGL();initClicks();
+            requestAnimationFrame(mainLoop);
+            runCryptoData();
+        }
+        function stopBreach(){
+            running.value=false;aborted.value=true;
+            breachActive.value=false;
+            if(isAuto&&_bench){
+                _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps.value*2));
+                history.pushState({},'','/benchmark');
+                dispatchEvent(new PopStateEvent('popstate'));
+            }
+        }
+
+        onMounted(()=>{
+            if(isAuto){startBreach();setTimeout(stopBreach,duration*1000);}
+        });
+
+        return{running,aborted,currentFps,threadLoad,physBodies,glVerts,domNodes,dataOps,
+            cryptoLayers,elapsedStr,loadBarWidth,loadBarColor,breachActive,fpsDisplay,
+            fpsDisplayColor,clickTargets,logLines,startBreach,stopBreach};
+    },
+    template:`
+<div style="max-width:1400px;margin:0 auto;">
+    <div class="vue-banner">🟢 Vue 3 <span style="font-weight:normal;font-size:.75rem;">— Composition API + Reactive Proxy</span></div>
+    <h2 style="margin:8px 0;font-size:1.2rem;">🕳️ Tunnel Breach — ALL tests simultaneously</h2>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button style="padding:8px 24px;border:none;border-radius:6px;background:linear-gradient(135deg,#f85149,#d29922);color:#fff;font-weight:bold;cursor:pointer;font-size:1rem;" @click="startBreach" :disabled="running">🕳️ INITIATE BREACH</button>
+        <button style="padding:8px 24px;border:none;border-radius:6px;background:#6c757d;color:#fff;font-weight:bold;cursor:pointer" @click="stopBreach" :disabled="!running">⏹ ABORT</button>
+    </div>
+    <div class="tunnel-hud">
+        <div class="tunnel-metrics">
+            <div class="tunnel-metric"><div class="num" :style="{color:fpsDisplayColor}">{{currentFps}}</div><div class="lbl">Main Thread FPS</div></div>
+            <div class="tunnel-metric"><div class="num" style="color:#667eea">{{threadLoad}}</div><div class="lbl">Thread Load</div></div>
+            <div class="tunnel-metric"><div class="num" style="color:#d2a8ff">{{physBodies}}</div><div class="lbl">Physics Bodies</div></div>
+            <div class="tunnel-metric"><div class="num" style="color:#667eea">{{glVerts}}</div><div class="lbl">GL Vertices</div></div>
+            <div class="tunnel-metric"><div class="num" style="color:#f0883e">{{domNodes}}</div><div class="lbl">DOM Targets</div></div>
+            <div class="tunnel-metric"><div class="num" style="color:#79c0ff">{{dataOps}}</div><div class="lbl">Data Ops</div></div>
+            <div class="tunnel-metric"><div class="num" style="color:#f85149">{{cryptoLayers}}</div><div class="lbl">Crypto Layers</div></div>
+            <div class="tunnel-metric"><div class="num" style="color:#e0e0e0">{{elapsedStr}}</div><div class="lbl">Elapsed</div></div>
+        </div>
+        <div class="tunnel-bar"><div class="tunnel-bar-fill" :style="{width:loadBarWidth,background:loadBarColor}"></div></div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:.6rem;color:#8b949e;">
+            <span>🟢 Safe</span><span>🟡 Warning (35fps)</span><span>🔴 Critical (20fps)</span><span>💀 Breach (&lt;10fps)</span>
+        </div>
+    </div>
+    <div class="tunnel-grid">
+        <div class="tunnel-cell">
+            <div class="tunnel-cell-label" style="color:#d2a8ff;">🌌 Physics</div>
+            <div class="tunnel-cell-fps" :style="{color:fpsDisplayColor}">{{fpsDisplay}}</div>
+            <canvas id="cPhysVue"></canvas>
+        </div>
+        <div class="tunnel-cell">
+            <div class="tunnel-cell-label" style="color:#667eea;">💎 WebGL</div>
+            <div class="tunnel-cell-fps" :style="{color:fpsDisplayColor}">{{fpsDisplay}}</div>
+            <canvas id="cGlVue"></canvas>
+        </div>
+        <div class="tunnel-cell" id="clickArenaVue" style="cursor:crosshair;">
+            <div class="tunnel-cell-label" style="color:#f0883e;">🎯 Click Storm</div>
+            <div class="tunnel-cell-fps" :style="{color:fpsDisplayColor}">{{fpsDisplay}}</div>
+            <div v-for="t in clickTargets" :key="t.id" class="tunnel-target-vue"
+                :style="{width:t.sz+'px',height:t.sz+'px',background:t.color,opacity:t.opacity,
+                    transform:'translate('+t.x+'px,'+t.y+'px)'}"></div>
+        </div>
+        <div class="tunnel-cell" style="display:flex;flex-direction:column;">
+            <div class="tunnel-cell-label" style="color:#f85149;">🔐 Crypto + Data</div>
+            <div class="tunnel-cell-fps" :style="{color:fpsDisplayColor}">{{fpsDisplay}}</div>
+            <div id="vueTunnelLog" style="flex:1;overflow-y:auto;padding:24px 8px 8px;font-family:monospace;font-size:.65rem;color:#8b949e;white-space:pre-wrap;">
+                <div v-for="(line,i) in logLines" :key="i">{{line}}</div>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="breach-alert" :class="{active:breachActive}"></div>`
+}).mount('#bench-root');
+})();
+</script>

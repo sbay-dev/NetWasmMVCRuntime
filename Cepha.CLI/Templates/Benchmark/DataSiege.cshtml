@@ -1,0 +1,177 @@
+<style>
+.data-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.data-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.data-ctrl input[type=range]{width:130px;accent-color:#79c0ff}
+.data-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.data-metric{text-align:center}.data-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.data-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+.data-log{max-height:300px;overflow-y:auto;padding:10px;background:#0a0a1a;border-radius:8px;border:1px solid #333;font-family:monospace;font-size:.75rem;color:#8b949e;white-space:pre-wrap}
+.data-log .ok{color:#3fb950}.data-log .hot{color:#f0883e}.data-log .bad{color:#f85149}
+</style>
+<div style="max-width:1200px;margin:0 auto;">
+    <h2 style="margin:8px 0;font-size:1.2rem;">🗄️ Data Siege — Million-object array operations</h2>
+
+    <div class="data-ctrl">
+        <div><label>Records</label><br><input type="range" id="ctrlRecords" min="10000" max="5000000" value="500000" step="10000"><span id="valRecords" style="color:#79c0ff;font-weight:bold;margin-left:4px">500,000</span></div>
+        <div><label>Complexity</label><br><input type="range" id="ctrlComplexity" min="1" max="10" value="3"><span id="valComplexity" style="color:#79c0ff;font-weight:bold;margin-left:4px">3</span></div>
+        <button id="btnRun" style="padding:6px 16px;border:none;border-radius:6px;background:#28a745;color:#fff;font-weight:bold;cursor:pointer">▶ RUN SIEGE</button>
+        <button id="btnAbort" style="padding:6px 16px;border:none;border-radius:6px;background:#dc3545;color:#fff;font-weight:bold;cursor:pointer" disabled>⏹ ABORT</button>
+    </div>
+
+    <div class="data-metrics">
+        <div class="data-metric"><div class="num" id="mFps" style="color:#3fb950">0</div><div class="lbl">Main Thread FPS</div></div>
+        <div class="data-metric"><div class="num" id="mRecords" style="color:#79c0ff">0</div><div class="lbl">Records</div></div>
+        <div class="data-metric"><div class="num" id="mOps" style="color:#f0883e">0</div><div class="lbl">Ops Completed</div></div>
+        <div class="data-metric"><div class="num" id="mThroughput" style="color:#d2a8ff">0</div><div class="lbl">M Records/sec</div></div>
+        <div class="data-metric"><div class="num" id="mMemory" style="color:#d29922">0</div><div class="lbl">Est. Memory MB</div></div>
+        <div class="data-metric"><div class="num" id="mElapsed" style="color:#e0e0e0">0</div><div class="lbl">Elapsed sec</div></div>
+    </div>
+
+    <div class="data-log" id="log">🗄️ Data Siege — Ready. Adjust records and hit RUN.\n</div>
+</div>
+
+<script>
+(function(){
+    const _bench=window.__cephaBench;
+    const isAuto=_bench&&_bench.active;
+    const duration=(_bench&&_bench.duration)||8;
+    const logEl=document.getElementById('log');
+    let running=false,aborted=false,opsCompleted=0,fpsFrames=0,lastFpsTime=performance.now(),currentFps=60,animId;
+
+    document.getElementById('ctrlRecords').oninput=function(){document.getElementById('valRecords').textContent=Number(this.value).toLocaleString();};
+    document.getElementById('ctrlComplexity').oninput=function(){document.getElementById('valComplexity').textContent=this.value;};
+
+    function log(msg,cls){logEl.innerHTML+=`<span class="${cls||''}">${msg}</span>\n`;logEl.scrollTop=logEl.scrollHeight;}
+
+    // FPS counter runs independently
+    function fpsLoop(){fpsFrames++;const now=performance.now();
+        if(now-lastFpsTime>=500){currentFps=Math.round(fpsFrames*1000/(now-lastFpsTime));fpsFrames=0;lastFpsTime=now;
+            const el=document.getElementById('mFps');el.textContent=currentFps;el.style.color=currentFps>=50?'#3fb950':currentFps>=30?'#d29922':'#f85149';}
+        animId=requestAnimationFrame(fpsLoop);}
+    animId=requestAnimationFrame(fpsLoop);
+
+    async function runSiege(){
+        if(running)return;running=true;aborted=false;opsCompleted=0;
+        document.getElementById('btnRun').disabled=true;document.getElementById('btnAbort').disabled=false;
+        const N=+document.getElementById('ctrlRecords').value;
+        const complexity=+document.getElementById('ctrlComplexity').value;
+        const startTime=performance.now();
+        logEl.innerHTML='';
+
+        // Phase 1: Generate complex data
+        log(`⚡ Generating ${N.toLocaleString()} records (complexity: ${complexity})...`,'hot');
+        await yieldFrame();
+        const data=[];
+        const batchSize=50000;
+        for(let i=0;i<N&&!aborted;i++){
+            const rec={id:i,name:'User_'+i+'_'+Math.random().toString(36).substr(2,8),
+                score:Math.random()*10000,tags:[],nested:{}};
+            for(let c=0;c<complexity;c++){
+                rec.tags.push('tag_'+Math.floor(Math.random()*1000));
+                rec.nested['field_'+c]={value:Math.random(),hash:Math.random().toString(36)};
+            }
+            data.push(rec);
+            if(i%batchSize===0&&i>0){
+                document.getElementById('mRecords').textContent=(i).toLocaleString();
+                document.getElementById('mElapsed').textContent=((performance.now()-startTime)/1000).toFixed(1);
+                await yieldFrame();
+            }
+        }
+        if(aborted){finish(startTime,N);return;}
+        document.getElementById('mRecords').textContent=N.toLocaleString();
+        document.getElementById('mMemory').textContent=Math.round(N*complexity*0.0005);
+        log(`✅ Generated ${N.toLocaleString()} records in ${((performance.now()-startTime)/1000).toFixed(2)}s`,'ok');
+        opsCompleted++;
+
+        // Phase 2: Sort
+        log('⚡ Sorting by score (Array.sort)...','hot');await yieldFrame();
+        let t0=performance.now();
+        data.sort((a,b)=>a.score-b.score);
+        log(`✅ Sort completed in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+        updateMetrics(startTime,N);await yieldFrame();
+
+        // Phase 3: Binary search × 10000
+        if(!aborted){
+            log('⚡ Running 10,000 binary searches...','hot');await yieldFrame();
+            t0=performance.now();
+            for(let s=0;s<10000&&!aborted;s++){
+                const target=Math.random()*10000;
+                binarySearch(data,target);
+            }
+            log(`✅ 10K searches in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+            updateMetrics(startTime,N);await yieldFrame();
+        }
+
+        // Phase 4: Filter + Map + Reduce chain
+        if(!aborted){
+            log('⚡ Filter → Map → Reduce chain...','hot');await yieldFrame();
+            t0=performance.now();
+            const result=data.filter(r=>r.score>5000).map(r=>({id:r.id,doubled:r.score*2,tagCount:r.tags.length})).reduce((sum,r)=>sum+r.doubled,0);
+            log(`✅ Chain result: ${result.toFixed(0)} in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+            updateMetrics(startTime,N);await yieldFrame();
+        }
+
+        // Phase 5: GroupBy simulation
+        if(!aborted){
+            log('⚡ GroupBy first tag (Map accumulation)...','hot');await yieldFrame();
+            t0=performance.now();
+            const groups=new Map();
+            for(const r of data){const key=r.tags[0]||'none';if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r.id);}
+            log(`✅ ${groups.size} groups created in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+            updateMetrics(startTime,N);await yieldFrame();
+        }
+
+        // Phase 6: Deep clone + mutate
+        if(!aborted){
+            const cloneN=Math.min(N,200000);
+            log(`⚡ Deep clone + mutate ${cloneN.toLocaleString()} records...`,'hot');await yieldFrame();
+            t0=performance.now();
+            const cloned=data.slice(0,cloneN).map(r=>JSON.parse(JSON.stringify(r)));
+            for(const r of cloned)r.score*=2;
+            log(`✅ Clone+mutate in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+            updateMetrics(startTime,N);await yieldFrame();
+        }
+
+        // Phase 7: Reverse sort
+        if(!aborted){
+            log('⚡ Reverse sort by name (string comparison)...','hot');await yieldFrame();
+            t0=performance.now();
+            data.sort((a,b)=>b.name.localeCompare(a.name));
+            log(`✅ String sort in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+            updateMetrics(startTime,N);
+        }
+
+        finish(startTime,N);
+    }
+
+    function binarySearch(arr,target){
+        let lo=0,hi=arr.length-1;
+        while(lo<=hi){const mid=(lo+hi)>>>1;if(arr[mid].score<target)lo=mid+1;else hi=mid-1;}
+        return lo;
+    }
+
+    function updateMetrics(startTime,N){
+        const elapsed=(performance.now()-startTime)/1000;
+        document.getElementById('mOps').textContent=opsCompleted;
+        document.getElementById('mThroughput').textContent=(N/elapsed/1000000).toFixed(2);
+        document.getElementById('mElapsed').textContent=elapsed.toFixed(1);
+    }
+
+    function finish(startTime,N){
+        running=false;document.getElementById('btnRun').disabled=false;document.getElementById('btnAbort').disabled=true;
+        const elapsed=(performance.now()-startTime)/1000;
+        log(aborted?'⛔ Aborted.':'🏁 SIEGE COMPLETE — '+opsCompleted+' operations, '+elapsed.toFixed(2)+'s, FPS: '+currentFps,aborted?'bad':'ok');
+        updateMetrics(startTime,N);
+        if(isAuto&&_bench){
+            _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps*1.5+opsCompleted*5));
+            history.pushState({},'','/benchmark');
+            dispatchEvent(new PopStateEvent('popstate'));
+        }
+    }
+
+    function yieldFrame(){return new Promise(r=>requestAnimationFrame(r));}
+
+    document.getElementById('btnRun').onclick=runSiege;
+    document.getElementById('btnAbort').onclick=()=>{aborted=true;};
+
+    if(isAuto){document.getElementById('ctrlRecords').value=200000;document.getElementById('valRecords').textContent='200,000';runSiege();}
+})();
+</script>

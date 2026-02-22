@@ -1,0 +1,154 @@
+<style>
+.phys-canvas{width:100%;height:520px;background:#0a0a1a;border-radius:8px;border:1px solid #333;display:block}
+.phys-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.phys-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.phys-ctrl input[type=range]{width:110px;accent-color:#d2a8ff}
+.phys-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.phys-metric{text-align:center}.phys-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.phys-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+</style>
+<div style="max-width:1200px;margin:0 auto;">
+    <h2 style="margin:8px 0;font-size:1.2rem;">🌌 Particle Physics — N-body gravity simulation</h2>
+
+    <div class="phys-ctrl">
+        <div><label>Bodies</label><br><input type="range" id="ctrlBodies" min="50" max="5000" value="500" step="50"><span id="valBodies" style="color:#d2a8ff;font-weight:bold;margin-left:4px">500</span></div>
+        <div><label>Gravity</label><br><input type="range" id="ctrlGravity" min="1" max="100" value="30"><span id="valGravity" style="color:#d2a8ff;font-weight:bold;margin-left:4px">30</span></div>
+        <div><label>Time Step</label><br><input type="range" id="ctrlDt" min="1" max="50" value="16"><span id="valDt" style="color:#d2a8ff;font-weight:bold;margin-left:4px">16</span></div>
+        <div><label>Trails</label><br><input type="range" id="ctrlTrail" min="0" max="100" value="20"><span id="valTrail" style="color:#d2a8ff;font-weight:bold;margin-left:4px">20</span></div>
+        <button id="btnStart" style="padding:6px 16px;border:none;border-radius:6px;background:#28a745;color:#fff;font-weight:bold;cursor:pointer">▶ START</button>
+        <button id="btnStop" style="padding:6px 16px;border:none;border-radius:6px;background:#dc3545;color:#fff;font-weight:bold;cursor:pointer" disabled>⏹ STOP</button>
+    </div>
+
+    <div class="phys-metrics">
+        <div class="phys-metric"><div class="num" id="mFps" style="color:#3fb950">0</div><div class="lbl">FPS</div></div>
+        <div class="phys-metric"><div class="num" id="mBodies" style="color:#d2a8ff">0</div><div class="lbl">Bodies</div></div>
+        <div class="phys-metric"><div class="num" id="mCollisions" style="color:#f0883e">0</div><div class="lbl">Collisions</div></div>
+        <div class="phys-metric"><div class="num" id="mCalcs" style="color:#79c0ff">0</div><div class="lbl">Calcs/frame</div></div>
+        <div class="phys-metric"><div class="num" id="mEnergy" style="color:#e0e0e0">0</div><div class="lbl">Kinetic Energy</div></div>
+        <div class="phys-metric"><div class="num" id="mFrameTime" style="color:#d29922">0</div><div class="lbl">Frame ms</div></div>
+    </div>
+
+    <canvas id="physCanvas" class="phys-canvas"></canvas>
+</div>
+
+<script>
+(function(){
+    const _bench=window.__cephaBench;
+    const isAuto=_bench&&_bench.active;
+    const duration=(_bench&&_bench.duration)||8;
+    const canvas=document.getElementById('physCanvas');
+    const ctx=canvas.getContext('2d');
+    let running=false,animId=null,bodies=[];
+    let fpsFrames=0,lastFpsTime=performance.now(),currentFps=60,collisionsTotal=0;
+    const colors=['#667eea','#f0883e','#3fb950','#f85149','#d2a8ff','#79c0ff','#d29922','#ff6b9d','#00d4aa','#e0e0e0'];
+
+    function resize(){canvas.width=canvas.clientWidth;canvas.height=canvas.clientHeight;}
+    resize();window.addEventListener('resize',resize);
+
+    ['ctrlBodies','ctrlGravity','ctrlDt','ctrlTrail'].forEach(id=>{
+        document.getElementById(id).oninput=function(){document.getElementById(id.replace('ctrl','val')).textContent=this.value;};
+    });
+
+    function init(){
+        bodies=[];
+        const n=+document.getElementById('ctrlBodies').value;
+        const W=canvas.width,H=canvas.height;
+        for(let i=0;i<n;i++){
+            bodies.push({
+                x:Math.random()*W,y:Math.random()*H,
+                vx:(Math.random()-.5)*2,vy:(Math.random()-.5)*2,
+                mass:Math.random()*3+.5,
+                r:Math.random()*2.5+1,
+                color:colors[i%colors.length]
+            });
+        }
+        collisionsTotal=0;
+    }
+
+    function tick(){
+        if(!running)return;
+        const t0=performance.now();
+        const G=+document.getElementById('ctrlGravity').value*.0001;
+        const dt=+document.getElementById('ctrlDt').value/16;
+        const trail=+document.getElementById('ctrlTrail').value/100;
+        const W=canvas.width,H=canvas.height;
+        const n=bodies.length;
+        let calcs=0,colThisFrame=0,kineticE=0;
+
+        // Gravity: O(n²) brute-force for maximum thread punishment
+        for(let i=0;i<n;i++){
+            const a=bodies[i];
+            for(let j=i+1;j<n;j++){
+                const b=bodies[j];
+                const dx=b.x-a.x,dy=b.y-a.y;
+                const distSq=dx*dx+dy*dy+1;
+                const F=G*a.mass*b.mass/distSq;
+                const dist=Math.sqrt(distSq);
+                const fx=F*dx/dist,fy=F*dy/dist;
+                a.vx+=fx/a.mass*dt;a.vy+=fy/a.mass*dt;
+                b.vx-=fx/b.mass*dt;b.vy-=fy/b.mass*dt;
+                calcs++;
+
+                // Collision
+                if(dist<a.r+b.r+2){
+                    colThisFrame++;collisionsTotal++;
+                    const nx=dx/dist,ny=dy/dist;
+                    const dvx=a.vx-b.vx,dvy=a.vy-b.vy;
+                    const dvn=dvx*nx+dvy*ny;
+                    if(dvn>0){
+                        const impulse=2*dvn/(a.mass+b.mass);
+                        a.vx-=impulse*b.mass*nx;a.vy-=impulse*b.mass*ny;
+                        b.vx+=impulse*a.mass*nx;b.vy+=impulse*a.mass*ny;
+                    }
+                }
+            }
+        }
+
+        // Update positions + bounds
+        for(const b of bodies){
+            b.x+=b.vx*dt;b.y+=b.vy*dt;
+            if(b.x<0){b.x=0;b.vx*=-.8;}if(b.x>W){b.x=W;b.vx*=-.8;}
+            if(b.y<0){b.y=0;b.vy*=-.8;}if(b.y>H){b.y=H;b.vy*=-.8;}
+            kineticE+=.5*b.mass*(b.vx*b.vx+b.vy*b.vy);
+        }
+
+        // Render
+        ctx.fillStyle=`rgba(10,10,26,${1-trail})`;
+        ctx.fillRect(0,0,W,H);
+        for(const b of bodies){
+            ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);
+            ctx.fillStyle=b.color;ctx.fill();
+        }
+
+        // FPS
+        const now=performance.now();
+        fpsFrames++;
+        if(now-lastFpsTime>=500){
+            currentFps=Math.round(fpsFrames*1000/(now-lastFpsTime));
+            fpsFrames=0;lastFpsTime=now;
+            document.getElementById('mFps').textContent=currentFps;
+            document.getElementById('mFps').style.color=currentFps>=50?'#3fb950':currentFps>=30?'#d29922':'#f85149';
+        }
+        document.getElementById('mBodies').textContent=n;
+        document.getElementById('mCollisions').textContent=collisionsTotal;
+        document.getElementById('mCalcs').textContent=calcs;
+        document.getElementById('mEnergy').textContent=Math.round(kineticE);
+        document.getElementById('mFrameTime').textContent=(performance.now()-t0).toFixed(1);
+
+        animId=requestAnimationFrame(tick);
+    }
+
+    function start(){running=true;init();fpsFrames=0;lastFpsTime=performance.now();animId=requestAnimationFrame(tick);
+        document.getElementById('btnStart').disabled=true;document.getElementById('btnStop').disabled=false;}
+    function stop(){running=false;if(animId)cancelAnimationFrame(animId);
+        document.getElementById('btnStart').disabled=false;document.getElementById('btnStop').disabled=true;
+        if(isAuto&&_bench){
+            _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps*1.6));
+            history.pushState({},'','/benchmark');
+            dispatchEvent(new PopStateEvent('popstate'));
+        }
+    }
+    document.getElementById('btnStart').onclick=start;
+    document.getElementById('btnStop').onclick=stop;
+
+    if(isAuto){start();setTimeout(stop,duration*1000);}
+})();
+</script>

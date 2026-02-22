@@ -1,0 +1,165 @@
+<style>
+.storm-arena{position:relative;width:100%;height:500px;overflow:hidden;background:#0a0a1a;border-radius:8px;border:1px solid #333;cursor:crosshair}
+.storm-target{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;cursor:pointer;user-select:none;will-change:transform;transition:none}
+.storm-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.storm-metric{text-align:center}.storm-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.storm-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+.storm-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.storm-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.storm-ctrl input[type=range]{width:120px;accent-color:#f0883e}
+.storm-btn{padding:6px 16px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:.8rem}
+</style>
+<div style="max-width:1200px;margin:0 auto;">
+    <h2 style="margin:8px 0;font-size:1.2rem;">🎯 Click Storm — Hit the moving targets</h2>
+
+    <div class="storm-ctrl">
+        <div><label>Targets</label><br><input type="range" id="ctrlTargets" min="20" max="500" value="50"><span id="valTargets" style="color:#f0883e;font-weight:bold;margin-left:4px">50</span></div>
+        <div><label>Speed</label><br><input type="range" id="ctrlMoveSpeed" min="1" max="200" value="60"><span id="valMoveSpeed" style="color:#f0883e;font-weight:bold;margin-left:4px">60</span></div>
+        <div><label>Spawn on Click</label><br><input type="range" id="ctrlSpawn" min="0" max="10" value="3"><span id="valSpawn" style="color:#f0883e;font-weight:bold;margin-left:4px">3</span></div>
+        <button class="storm-btn" id="btnGo" style="background:#28a745;color:#fff;">▶ START</button>
+        <button class="storm-btn" id="btnHalt" style="background:#dc3545;color:#fff;" disabled>⏹ STOP</button>
+    </div>
+
+    <div class="storm-metrics">
+        <div class="storm-metric"><div class="num" id="mFps" style="color:#3fb950">0</div><div class="lbl">FPS</div></div>
+        <div class="storm-metric"><div class="num" id="mHits" style="color:#f0883e">0</div><div class="lbl">Hits</div></div>
+        <div class="storm-metric"><div class="num" id="mMisses" style="color:#f85149">0</div><div class="lbl">Misses</div></div>
+        <div class="storm-metric"><div class="num" id="mLatency" style="color:#79c0ff">0</div><div class="lbl">Avg Latency ms</div></div>
+        <div class="storm-metric"><div class="num" id="mEvents" style="color:#d2a8ff">0</div><div class="lbl">Events/sec</div></div>
+        <div class="storm-metric"><div class="num" id="mActive" style="color:#667eea">0</div><div class="lbl">Active Targets</div></div>
+        <div class="storm-metric"><div class="num" id="mTotal" style="color:#e0e0e0">0</div><div class="lbl">Total Clicks</div></div>
+        <div class="storm-metric"><div class="num" id="mAccuracy" style="color:#3fb950">0%</div><div class="lbl">Accuracy</div></div>
+    </div>
+
+    <div class="storm-arena" id="arena"></div>
+</div>
+
+<script>
+(function(){
+    const _bench=window.__cephaBench;
+    const isAuto=_bench&&_bench.active;
+    const duration=(_bench&&_bench.duration)||8;
+    const arena=document.getElementById('arena');
+    let running=false,animId=null,targets=[],hits=0,misses=0,totalClicks=0;
+    let latencies=[],eventsThisSec=0,lastEvTime=performance.now();
+    let frames=0,lastFpsTime=performance.now(),currentFps=60;
+    const colors=['#f0883e','#f85149','#3fb950','#667eea','#d2a8ff','#79c0ff','#e0e0e0','#d29922','#ff6b9d','#00d4aa'];
+
+    function getCount(){return+document.getElementById('ctrlTargets').value}
+    function getSpeed(){return+document.getElementById('ctrlMoveSpeed').value}
+    function getSpawn(){return+document.getElementById('ctrlSpawn').value}
+
+    ['ctrlTargets','ctrlMoveSpeed','ctrlSpawn'].forEach(id=>{
+        document.getElementById(id).oninput=function(){document.getElementById(id.replace('ctrl','val')).textContent=this.value;};
+    });
+
+    function createTarget(x,y,sz){
+        sz=sz||Math.random()*30+14;
+        const el=document.createElement('div');
+        el.className='storm-target';
+        el.style.cssText=`width:${sz}px;height:${sz}px;background:${colors[Math.floor(Math.random()*colors.length)]};font-size:${Math.max(8,sz*.35)}px;color:#fff;`;
+        const t={el,x:x??Math.random()*(arena.clientWidth-sz),y:y??Math.random()*(arena.clientHeight-sz),vx:(Math.random()-.5)*4,vy:(Math.random()-.5)*4,sz,born:performance.now()};
+        el.style.transform=`translate(${t.x}px,${t.y}px)`;
+        el.textContent='●';
+        el.addEventListener('pointerdown',e=>{
+            e.preventDefault();e.stopPropagation();
+            const lat=performance.now()-t.lastRender;
+            latencies.push(lat);hits++;totalClicks++;eventsThisSec++;
+            // Spawn more
+            const spawn=getSpawn();
+            for(let i=0;i<spawn;i++)createTarget(t.x+Math.random()*40-20,t.y+Math.random()*40-20,t.sz*.7);
+            // Flash and remove
+            el.style.transform=`translate(${t.x}px,${t.y}px) scale(1.5)`;
+            el.style.opacity='0';
+            setTimeout(()=>{if(el.parentNode)el.parentNode.removeChild(el);},150);
+            t.dead=true;
+        });
+        arena.appendChild(el);
+        targets.push(t);
+        return t;
+    }
+
+    arena.addEventListener('pointerdown',e=>{
+        if(e.target===arena){misses++;totalClicks++;eventsThisSec++;}
+    });
+
+    function init(){
+        arena.innerHTML='';targets=[];hits=0;misses=0;totalClicks=0;latencies=[];
+        const c=getCount();
+        for(let i=0;i<c;i++)createTarget();
+    }
+
+    function tick(now){
+        if(!running)return;
+        const spd=getSpeed()/60;
+        const W=arena.clientWidth,H=arena.clientHeight;
+        targets=targets.filter(t=>!t.dead);
+
+        for(const t of targets){
+            t.x+=t.vx*spd;t.y+=t.vy*spd;
+            if(t.x<0||t.x>W-t.sz)t.vx*=-1;
+            if(t.y<0||t.y>H-t.sz)t.vy*=-1;
+            t.x=Math.max(0,Math.min(W-t.sz,t.x));
+            t.y=Math.max(0,Math.min(H-t.sz,t.y));
+            t.el.style.transform=`translate(${t.x}px,${t.y}px)`;
+            t.lastRender=now;
+            // Random direction change
+            if(Math.random()<.02){t.vx+=(Math.random()-.5)*2;t.vy+=(Math.random()-.5)*2;}
+        }
+
+        // Respawn dead targets to maintain count
+        while(targets.length<getCount())createTarget();
+
+        // Metrics
+        frames++;
+        if(now-lastFpsTime>=500){
+            currentFps=Math.round(frames*1000/(now-lastFpsTime));
+            frames=0;lastFpsTime=now;
+            document.getElementById('mFps').textContent=currentFps;
+            document.getElementById('mFps').style.color=currentFps>=50?'#3fb950':currentFps>=30?'#d29922':'#f85149';
+        }
+        if(now-lastEvTime>=1000){
+            document.getElementById('mEvents').textContent=eventsThisSec;
+            eventsThisSec=0;lastEvTime=now;
+        }
+        document.getElementById('mHits').textContent=hits;
+        document.getElementById('mMisses').textContent=misses;
+        document.getElementById('mActive').textContent=targets.length;
+        document.getElementById('mTotal').textContent=totalClicks;
+        document.getElementById('mLatency').textContent=latencies.length?Math.round(latencies.reduce((a,b)=>a+b,0)/latencies.length):'0';
+        document.getElementById('mAccuracy').textContent=totalClicks>0?Math.round(hits/totalClicks*100)+'%':'0%';
+
+        animId=requestAnimationFrame(tick);
+    }
+
+    function start(){running=true;init();frames=0;lastFpsTime=performance.now();animId=requestAnimationFrame(tick);
+        document.getElementById('btnGo').disabled=true;document.getElementById('btnHalt').disabled=false;}
+    function stop(){running=false;if(animId)cancelAnimationFrame(animId);
+        document.getElementById('btnGo').disabled=false;document.getElementById('btnHalt').disabled=true;
+        if(isAuto&&_bench){
+            const score=Math.min(100,Math.round(currentFps*1.5+(latencies.length?Math.max(0,100-latencies.reduce((a,b)=>a+b,0)/latencies.length):0)));
+            _bench.scores[_bench.currentTest]=score;
+            history.pushState({},'','/benchmark');
+            dispatchEvent(new PopStateEvent('popstate'));
+        }
+    }
+
+    document.getElementById('btnGo').onclick=start;
+    document.getElementById('btnHalt').onclick=stop;
+
+    // Auto-pilot: simulate clicks
+    if(isAuto){
+        start();
+        const clickIv=setInterval(()=>{
+            if(!running)return;
+            // Simulate rapid clicks on random targets
+            for(let i=0;i<5;i++){
+                const alive=targets.filter(t=>!t.dead);
+                if(alive.length){
+                    const t=alive[Math.floor(Math.random()*alive.length)];
+                    t.el.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));
+                }
+            }
+        },50);
+        setTimeout(()=>{clearInterval(clickIv);stop();},duration*1000);
+    }
+})();
+</script>

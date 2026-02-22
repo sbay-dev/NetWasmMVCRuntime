@@ -1,0 +1,24 @@
+<Project>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       🧬 NetWasmMvc.SDK v1.0 — Sdk.props
+       Auto-imported FIRST in <Project Sdk="NetWasmMvc.SDK">
+       ═══════════════════════════════════════════════════════════ -->
+
+  <!-- ─── Import base WebAssembly SDK ─── -->
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk.WebAssembly" />
+
+  <!-- ─── NetWasmMvc defaults ─── -->
+  <PropertyGroup>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net10.0</TargetFramework>
+    <Nullable        Condition="'$(Nullable)'        == ''">enable</Nullable>
+    <ImplicitUsings  Condition="'$(ImplicitUsings)'  == ''">enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishTrimmed>false</PublishTrimmed>
+    <OverrideHtmlAssetPlaceholders Condition="'$(OverrideHtmlAssetPlaceholders)' == ''">true</OverrideHtmlAssetPlaceholders>
+    <NetWasmMvcVersion Condition="'$(NetWasmMvcVersion)' == ''">1.0.6</NetWasmMvcVersion>
+    <!-- Disable Razor compilation — .cshtml are embedded resources, not compiled views -->
+    <EnableDefaultRazorGenerateItems>false</EnableDefaultRazorGenerateItems>
+  </PropertyGroup>
+
+</Project>

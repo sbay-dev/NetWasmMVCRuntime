@@ -1,0 +1,877 @@
+@{
+    ViewData["Title"] = "Cepha — The Intelligent WebAssembly SDK";
+    /* Brand Colors from sbay Brand Guide 2025:
+       Green #00C851 | Green+Yellow #7FC141 | Yellow #FFBB33
+       Yellow+Blue #A1A092 | Blue #4285F4 | Blue+Red #A1649B | Red #FF4444 */
+}
+
+<!-- ══════════════════════════════════════════════════════════════
+     CEPHA — Full-width immersive SDK documentation page
+     Breaks out of the .container to go edge-to-edge
+     ══════════════════════════════════════════════════════════════ -->
+
+<div class="c-page">
+
+<!-- ────────────────────────── HERO ────────────────────────── -->
+<section class="c-hero">
+    <div class="c-hero-bg"></div>
+    <div class="c-hero-content">
+        <img src="Cepha.png" alt="Cepha Logo" class="c-hero-logo" />
+        <h1 class="c-hero-title">Cepha</h1>
+        <p class="c-hero-latin">Physarum polycephalum</p>
+        <p class="c-hero-tagline">
+            The Intelligent WebAssembly SDK
+        </p>
+        <p class="c-hero-desc">
+            .NET MVC + SignalR + SQLite — Entirely in WebAssembly
+            <br/>
+            One codebase runs in the browser <em>and on</em> the server.
+        </p>
+        <div class="c-hero-actions">
+            <a href="#get-started" class="c-btn c-btn-primary">Get Started</a>
+            <a href="#architecture" class="c-btn c-btn-ghost">Architecture</a>
+        </div>
+        <div class="c-hero-status" id="cepha-status">
+            <span class="c-status-dot" id="cepha-dot"></span>
+            <span id="cepha-status-text">Discovering...</span>
+        </div>
+        <div class="c-hero-version">
+            <span class="c-ver-badge">.NET 10</span>
+            <span class="c-ver-badge">WebAssembly</span>
+            <span class="c-ver-badge">Node.js</span>
+            <span class="c-ver-badge">v1.0</span>
+        </div>
+    </div>
+</section>
+
+<!-- ────────────────────── VALUE PROPS ─────────────────────── -->
+<section class="c-values">
+    <div class="c-container">
+        <div class="c-values-grid">
+            <div class="c-value" style="--accent: #00C851">
+                <div class="c-value-icon">⚡</div>
+                <h3>Serverless</h3>
+                <p>Your app runs entirely in the browser. Database, authentication, and routing — all local.</p>
+            </div>
+            <div class="c-value" style="--accent: #FFBB33">
+                <div class="c-value-icon">🔄</div>
+                <h3>Single Codebase</h3>
+                <p>Write a Controller once — it runs in the browser and on the server without modification.</p>
+            </div>
+            <div class="c-value" style="--accent: #4285F4">
+                <div class="c-value-icon">🌐</div>
+                <h3>Self-Adaptive</h3>
+                <p>Automatically discovers the server and routes requests through it. No server? Runs locally.</p>
+            </div>
+            <div class="c-value" style="--accent: #FF4444">
+                <div class="c-value-icon">💬</div>
+                <h3>Real-Time Communication</h3>
+                <p>SignalR over SSE — live chat across different browsers and devices in real time.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ────────────────── TWO PILLARS ─────────────────────────── -->
+<section class="c-pillars">
+    <div class="c-container">
+        <h2 class="c-section-title">The Ecosystem</h2>
+        <p class="c-section-sub">Two pillars working together intelligently — like the slime mold that solves mazes without a brain</p>
+
+        <div class="c-pillars-grid">
+            <!-- Cepha SPA -->
+            <div class="c-pillar c-pillar-spa">
+                <div class="c-pillar-header">
+                    <span class="c-pillar-icon">🌐</span>
+                    <div>
+                        <h3>Cepha</h3>
+                        <span class="c-pillar-label">Single Page Application</span>
+                    </div>
+                </div>
+                <div class="c-pillar-body">
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#00C851"></span>
+                        <div><strong>MVC Engine</strong><br/><small>Controllers + Views + Routing in the browser</small></div>
+                    </div>
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#7FC141"></span>
+                        <div><strong>SQLite</strong><br/><small>Full EF Core database running locally</small></div>
+                    </div>
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#FFBB33"></span>
+                        <div><strong>SignalR</strong><br/><small>Hub engine + BroadcastChannel across tabs</small></div>
+                    </div>
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#4285F4"></span>
+                        <div><strong>Identity</strong><br/><small>Login, roles, and local authentication</small></div>
+                    </div>
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#A1649B"></span>
+                        <div><strong>SPA Router</strong><br/><small>History API navigation without page reloads</small></div>
+                    </div>
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#FF4444"></span>
+                        <div><strong>Offline-First</strong><br/><small>Fully functional without an internet connection</small></div>
+                    </div>
+                </div>
+                <div class="c-pillar-cmd">
+                    <code><span class="c-cmd-prompt">$</span> dotnet run</code>
+                </div>
+            </div>
+
+            <!-- CephaKit Server -->
+            <div class="c-pillar c-pillar-kit">
+                <div class="c-pillar-header">
+                    <span class="c-pillar-icon">⚙️</span>
+                    <div>
+                        <h3>CephaKit</h3>
+                        <span class="c-pillar-label">Backend Server</span>
+                    </div>
+                </div>
+                <div class="c-pillar-body">
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#00C851"></span>
+                        <div><strong>WASM Runtime</strong><br/><small>.NET 10 running in Node.js via WebAssembly</small></div>
+                    </div>
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#7FC141"></span>
+                        <div><strong>Real SignalR</strong><br/><small>Live SSE streaming across all connected clients</small></div>
+                    </div>
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#FFBB33"></span>
+                        <div><strong>REST API</strong><br/><small>Real endpoints — Postman, cURL, any client</small></div>
+                    </div>
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#4285F4"></span>
+                        <div><strong>Shared Code</strong><br/><small>Same code from WasmMvcRuntime.App</small></div>
+                    </div>
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#A1649B"></span>
+                        <div><strong>Central DB</strong><br/><small>Centralized database + shared Identity</small></div>
+                    </div>
+                    <div class="c-feature-row">
+                        <span class="c-feat-dot" style="background:#FF4444"></span>
+                        <div><strong>One-Line Setup</strong><br/><small><code>services.AddCephaKit()</code> — one line</small></div>
+                    </div>
+                </div>
+                <div class="c-pillar-cmd">
+                    <code><span class="c-cmd-prompt">$</span> node main.mjs</code>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ────────────────── ARCHITECTURE ────────────────────────── -->
+<section class="c-arch" id="architecture">
+    <div class="c-container">
+        <h2 class="c-section-title">Architecture</h2>
+        <p class="c-section-sub">One shared reference — two environments — automatic integration</p>
+
+        <div class="c-arch-visual">
+            <div class="c-arch-layer c-arch-shared">
+                <div class="c-arch-node c-arch-app-node">
+                    <strong>WasmMvcRuntime.App</strong>
+                    <span>Controllers · Hubs · Models · Repos · DbContext</span>
+                </div>
+            </div>
+            <div class="c-arch-arrows-row">
+                <svg width="100%" height="40" viewBox="0 0 600 40" preserveAspectRatio="xMidYMid meet">
+                    <defs>
+                        <linearGradient id="grad-left" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#4285F4;stop-opacity:1"/>
+                            <stop offset="100%" style="stop-color:#A1649B;stop-opacity:1"/>
+                        </linearGradient>
+                        <linearGradient id="grad-right" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#A1649B;stop-opacity:1"/>
+                            <stop offset="100%" style="stop-color:#00C851;stop-opacity:1"/>
+                        </linearGradient>
+                    </defs>
+                    <line x1="200" y1="5" x2="200" y2="35" stroke="url(#grad-left)" stroke-width="2" stroke-dasharray="4"/>
+                    <line x1="400" y1="5" x2="400" y2="35" stroke="url(#grad-right)" stroke-width="2" stroke-dasharray="4"/>
+                </svg>
+            </div>
+            <div class="c-arch-layer c-arch-runtime">
+                <div class="c-arch-node c-arch-browser">
+                    <span class="c-arch-badge">🌐</span>
+                    <strong>Browser WASM</strong>
+                    <span>Cepha SPA</span>
+                </div>
+                <div class="c-arch-link">
+                    <div class="c-arch-link-line"></div>
+                    <span>Auto-Discovery</span>
+                    <div class="c-arch-link-line"></div>
+                </div>
+                <div class="c-arch-node c-arch-server">
+                    <span class="c-arch-badge">⚙️</span>
+                    <strong>Node.js WASM</strong>
+                    <span>CephaKit Server</span>
+                </div>
+            </div>
+            <div class="c-arch-layer c-arch-clients">
+                <div class="c-arch-client-row">
+                    <span class="c-arch-client-tag">Chrome</span>
+                    <span class="c-arch-client-tag">Firefox</span>
+                    <span class="c-arch-client-tag">Safari</span>
+                    <span class="c-arch-client-tag">Postman</span>
+                    <span class="c-arch-client-tag">cURL</span>
+                    <span class="c-arch-client-tag">Mobile</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ────────────────── GET STARTED ─────────────────────────── -->
+<section class="c-start" id="get-started">
+    <div class="c-container">
+        <h2 class="c-section-title">Get Started</h2>
+        <p class="c-section-sub">From zero to a full application in minutes</p>
+
+        <div class="c-start-grid">
+            <!-- Step 1 -->
+            <div class="c-start-step">
+                <div class="c-step-num">1</div>
+                <h4>Frontend</h4>
+                <div class="c-code">
+                    <div class="c-code-header">
+                        <span class="c-code-dot" style="background:#FF4444"></span>
+                        <span class="c-code-dot" style="background:#FFBB33"></span>
+                        <span class="c-code-dot" style="background:#00C851"></span>
+                        <span class="c-code-title">Terminal</span>
+                    </div>
+<pre>cd WasmMvcRuntime.Client
+dotnet run
+
+<span class="c-code-comment"># ✅ http://localhost:5228</span>
+<span class="c-code-comment"># 🧬 MVC + SignalR + SQLite ready</span></pre>
+                </div>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="c-start-step">
+                <div class="c-step-num">2</div>
+                <h4>Server <small>(optional)</small></h4>
+                <div class="c-code">
+                    <div class="c-code-header">
+                        <span class="c-code-dot" style="background:#FF4444"></span>
+                        <span class="c-code-dot" style="background:#FFBB33"></span>
+                        <span class="c-code-dot" style="background:#00C851"></span>
+                        <span class="c-code-title">Terminal</span>
+                    </div>
+<pre>cd WasmMvcRuntime.Cepha
+dotnet build -c Release
+node bin/Release/net10.0/browser-wasm/AppBundle/main.mjs
+
+<span class="c-code-comment"># 🧬 Cepha Server on http://localhost:3000</span>
+<span class="c-code-comment"># ✅ 26 routes, 1 hub (Chat)</span></pre>
+                </div>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="c-start-step">
+                <div class="c-step-num">3</div>
+                <h4>CephaKit — One Line</h4>
+                <div class="c-code">
+                    <div class="c-code-header">
+                        <span class="c-code-dot" style="background:#FF4444"></span>
+                        <span class="c-code-dot" style="background:#FFBB33"></span>
+                        <span class="c-code-dot" style="background:#00C851"></span>
+                        <span class="c-code-title">Program.cs</span>
+                    </div>
+<pre><span class="c-code-kw">var</span> services = <span class="c-code-kw">new</span> <span class="c-code-type">ServiceCollection</span>();
+
+<span class="c-code-comment">// Everything: DB + Identity + MVC + SignalR + SSE</span>
+services.<span class="c-code-fn">AddCephaKit</span>();
+
+<span class="c-code-kw">var</span> provider = services.<span class="c-code-fn">BuildServiceProvider</span>();
+<span class="c-code-kw">await</span> provider.<span class="c-code-fn">UseCephaKit</span>();</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ────────────────── API REFERENCE ───────────────────────── -->
+<section class="c-api">
+    <div class="c-container">
+        <h2 class="c-section-title">Endpoints</h2>
+        <p class="c-section-sub">API Reference — CephaKit Server</p>
+
+        <div class="c-api-grid">
+            <div class="c-api-group">
+                <h4><span class="c-api-method c-api-rest">REST</span> API</h4>
+                <div class="c-api-item">
+                    <code class="c-api-get">GET</code>
+                    <span>/api/weatherapi/getall</span>
+                </div>
+                <div class="c-api-item">
+                    <code class="c-api-get">GET</code>
+                    <span>/api/weatherapi/getbyid?id=1</span>
+                </div>
+                <div class="c-api-item">
+                    <code class="c-api-post">POST</code>
+                    <span>/api/weatherapi/create</span>
+                </div>
+                <div class="c-api-item">
+                    <code class="c-api-put">PUT</code>
+                    <span>/api/weatherapi/update?id=1</span>
+                </div>
+                <div class="c-api-item">
+                    <code class="c-api-del">DELETE</code>
+                    <span>/api/weatherapi/delete?id=1</span>
+                </div>
+                <div class="c-api-item">
+                    <code class="c-api-get">GET</code>
+                    <span>/api/weatherapi/cities</span>
+                </div>
+                <div class="c-api-item">
+                    <code class="c-api-get">GET</code>
+                    <span>/api/weatherapi/stats</span>
+                </div>
+            </div>
+            <div class="c-api-group">
+                <h4><span class="c-api-method c-api-signalr">SignalR</span> Live Connection</h4>
+                <div class="c-api-item">
+                    <code class="c-api-post">POST</code>
+                    <span>/hub/{name}/negotiate</span>
+                    <small>Establish connection</small>
+                </div>
+                <div class="c-api-item">
+                    <code class="c-api-get">GET</code>
+                    <span>/hub/{name}/stream?connectionId=...</span>
+                    <small>SSE streaming</small>
+                </div>
+                <div class="c-api-item">
+                    <code class="c-api-post">POST</code>
+                    <span>/hub/{name}/invoke</span>
+                    <small>Invoke method</small>
+                </div>
+                <div class="c-api-item">
+                    <code class="c-api-post">POST</code>
+                    <span>/hub/{name}/disconnect</span>
+                    <small>Disconnect</small>
+                </div>
+            </div>
+            <div class="c-api-group">
+                <h4><span class="c-api-method c-api-meta">System</span> System</h4>
+                <div class="c-api-item">
+                    <code class="c-api-get">GET</code>
+                    <span>/_cepha/info</span>
+                    <small>Server information</small>
+                </div>
+                <div class="c-api-item">
+                    <code class="c-api-get">GET</code>
+                    <span>/health</span>
+                    <small>Health check</small>
+                </div>
+                <div class="c-api-item">
+                    <code class="c-api-get">GET</code>
+                    <span>/sse/{path}</span>
+                    <small>Server-Sent Events</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ────────────────── FOOTER ──────────────────────────────── -->
+<section class="c-footer">
+    <div class="c-container">
+        <img src="Cepha.png" alt="Cepha" class="c-footer-logo" />
+        <p class="c-footer-name">Cepha</p>
+        <p class="c-footer-tagline">Physarum polycephalum — Intelligence without a brain</p>
+        <div class="c-footer-colors">
+            <span style="background:#00C851"></span>
+            <span style="background:#7FC141"></span>
+            <span style="background:#FFBB33"></span>
+            <span style="background:#A1A092"></span>
+            <span style="background:#4285F4"></span>
+            <span style="background:#A1649B"></span>
+            <span style="background:#FF4444"></span>
+        </div>
+        <p class="c-footer-copy">© 2026 sbay — WasmMvcRuntime SDK</p>
+    </div>
+</section>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     STYLES — Premium SDK documentation design
+     ══════════════════════════════════════════════════════════════ -->
+<style>
+/* ── Reset & Page (break out of .container) ───────────────── */
+.c-page {
+    margin: -1rem calc(-50vw + 50%) -1rem calc(-50vw + 50%);
+    width: 100vw;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    color: #1a1a2e;
+    overflow-x: hidden;
+}
+.c-container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+/* ── Hero ─────────────────────────────────────────────────── */
+.c-hero {
+    position: relative;
+    min-height: 90vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0a0a0a;
+    overflow: hidden;
+}
+.c-hero-bg {
+    position: absolute; inset: 0;
+    background:
+        radial-gradient(ellipse at 20% 50%, rgba(0,200,81,0.12) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 30%, rgba(255,187,51,0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 50%, rgba(66,133,244,0.12) 0%, transparent 50%),
+        radial-gradient(ellipse at 35% 80%, rgba(161,100,155,0.08) 0%, transparent 40%),
+        radial-gradient(ellipse at 65% 70%, rgba(255,68,68,0.06) 0%, transparent 40%);
+    animation: c-bg-breathe 12s ease-in-out infinite;
+}
+@keyframes c-bg-breathe {
+    0%, 100% { opacity: 0.7; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.05); }
+}
+.c-hero-content {
+    position: relative; z-index: 1;
+    text-align: center;
+    padding: 3rem 2rem;
+}
+.c-hero-logo {
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 1.5rem;
+    box-shadow:
+        0 0 60px rgba(0,200,81,0.2),
+        0 0 120px rgba(66,133,244,0.1);
+    animation: c-logo-glow 6s ease-in-out infinite;
+}
+@keyframes c-logo-glow {
+    0%, 100% { box-shadow: 0 0 60px rgba(0,200,81,0.2), 0 0 120px rgba(66,133,244,0.1); }
+    33% { box-shadow: 0 0 60px rgba(255,187,51,0.25), 0 0 120px rgba(161,100,155,0.15); }
+    66% { box-shadow: 0 0 60px rgba(66,133,244,0.25), 0 0 120px rgba(255,68,68,0.1); }
+}
+.c-hero-title {
+    font-size: 4.5rem;
+    font-weight: 900;
+    letter-spacing: -2px;
+    margin: 0;
+    background: linear-gradient(135deg, #00C851, #7FC141, #FFBB33, #4285F4, #A1649B, #FF4444);
+    background-size: 300% 300%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: c-title-shift 8s ease-in-out infinite;
+}
+@keyframes c-title-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
+.c-hero-latin {
+    font-size: 1rem;
+    color: #666;
+    font-style: italic;
+    margin: 0.3rem 0 1rem;
+    letter-spacing: 2px;
+}
+.c-hero-tagline {
+    font-size: 1.5rem;
+    color: #ccc;
+    font-weight: 300;
+    margin-bottom: 0.5rem;
+}
+.c-hero-desc {
+    font-size: 1.1rem;
+    color: #888;
+    max-width: 600px;
+    margin: 0 auto 2rem;
+    line-height: 1.9;
+}
+.c-hero-actions { display: flex; gap: 12px; justify-content: center; margin-bottom: 2rem; }
+.c-btn {
+    padding: 12px 32px;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.3s;
+    cursor: pointer;
+}
+.c-btn-primary {
+    background: linear-gradient(135deg, #00C851, #4285F4);
+    color: #fff;
+    border: none;
+}
+.c-btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,200,81,0.3); color: #fff; }
+.c-btn-ghost {
+    background: transparent;
+    color: #888;
+    border: 1px solid #333;
+}
+.c-btn-ghost:hover { border-color: #666; color: #ccc; }
+.c-hero-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 8px 20px;
+    border-radius: 100px;
+    font-size: 0.85rem;
+    color: #aaa;
+    margin-bottom: 1rem;
+}
+.c-status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #FFBB33;
+    display: inline-block;
+}
+.c-status-dot.online { background: #00C851; box-shadow: 0 0 10px #00C851; }
+.c-status-dot.offline { background: #555; }
+.c-hero-version { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.c-ver-badge {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    background: rgba(255,255,255,0.06);
+    color: #777;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+/* ── Values ───────────────────────────────────────────────── */
+.c-values { padding: 80px 0; background: #fafbfc; }
+.c-values-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 24px;
+}
+.c-value {
+    padding: 32px 24px;
+    border-radius: 16px;
+    background: #fff;
+    border: 1px solid #eee;
+    transition: all 0.3s;
+    text-align: center;
+}
+.c-value:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.06);
+    border-color: var(--accent);
+}
+.c-value-icon { font-size: 2.5rem; margin-bottom: 12px; }
+.c-value h3 { font-size: 1.2rem; margin-bottom: 8px; color: #1a1a2e; }
+.c-value p { font-size: 0.9rem; color: #666; line-height: 1.6; margin: 0; }
+
+/* ── Section Titles ───────────────────────────────────────── */
+.c-section-title {
+    font-size: 2.2rem;
+    font-weight: 800;
+    text-align: center;
+    margin-bottom: 0.3rem;
+    color: #1a1a2e;
+}
+.c-section-sub {
+    text-align: center;
+    color: #888;
+    font-size: 1rem;
+    margin-bottom: 3rem;
+}
+
+/* ── Pillars ──────────────────────────────────────────────── */
+.c-pillars { padding: 80px 0; background: #fff; }
+.c-pillars-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+@media (max-width: 768px) { .c-pillars-grid { grid-template-columns: 1fr; } }
+.c-pillar {
+    border-radius: 20px;
+    overflow: hidden;
+    border: 1px solid #e8e8e8;
+    transition: all 0.3s;
+}
+.c-pillar:hover { box-shadow: 0 16px 48px rgba(0,0,0,0.08); }
+.c-pillar-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 24px 28px;
+}
+.c-pillar-spa .c-pillar-header { background: linear-gradient(135deg, #eef2ff, #f0f0ff); }
+.c-pillar-kit .c-pillar-header { background: linear-gradient(135deg, #ecfdf5, #f0fdf4); }
+.c-pillar-icon { font-size: 2rem; }
+.c-pillar-header h3 { font-size: 1.4rem; margin: 0; }
+.c-pillar-label { font-size: 0.85rem; color: #888; }
+.c-pillar-body { padding: 16px 28px; }
+.c-feature-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 12px 0;
+    border-bottom: 1px solid #f5f5f5;
+}
+.c-feature-row:last-child { border-bottom: none; }
+.c-feat-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 6px;
+}
+.c-feature-row strong { font-size: 0.95rem; display: block; }
+.c-feature-row small { font-size: 0.82rem; color: #888; }
+.c-pillar-cmd {
+    padding: 16px 28px;
+    background: #1a1a2e;
+    color: #d4d4d4;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.9rem;
+}
+.c-cmd-prompt { color: #00C851; margin-left: 6px; }
+
+/* ── Architecture ─────────────────────────────────────────── */
+.c-arch { padding: 80px 0; background: #0a0a0a; color: #e0e0e0; }
+.c-arch .c-section-title { color: #fff; }
+.c-arch .c-section-sub { color: #666; }
+.c-arch-visual { max-width: 700px; margin: 0 auto; }
+.c-arch-layer { display: flex; justify-content: center; gap: 24px; margin-bottom: 8px; flex-wrap: wrap; }
+.c-arch-node {
+    padding: 20px 28px;
+    border-radius: 14px;
+    text-align: center;
+    min-width: 200px;
+}
+.c-arch-node strong { display: block; font-size: 1rem; margin-bottom: 4px; }
+.c-arch-node span { font-size: 0.8rem; color: #999; }
+.c-arch-app-node {
+    background: rgba(161,100,155,0.15);
+    border: 1px solid rgba(161,100,155,0.4);
+    width: 100%;
+    max-width: 500px;
+}
+.c-arch-browser {
+    background: rgba(66,133,244,0.1);
+    border: 1px solid rgba(66,133,244,0.3);
+}
+.c-arch-server {
+    background: rgba(0,200,81,0.1);
+    border: 1px solid rgba(0,200,81,0.3);
+}
+.c-arch-badge { font-size: 1.5rem; display: block; margin-bottom: 6px; }
+.c-arch-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #555;
+    font-size: 0.8rem;
+}
+.c-arch-link-line {
+    width: 30px;
+    height: 1px;
+    background: linear-gradient(90deg, #4285F4, #00C851);
+}
+.c-arch-arrows-row { text-align: center; margin: 4px 0; }
+.c-arch-clients { margin-top: 20px; }
+.c-arch-client-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.c-arch-client-tag {
+    padding: 4px 14px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #888;
+}
+
+/* ── Get Started ──────────────────────────────────────────── */
+.c-start { padding: 80px 0; background: #fafbfc; }
+.c-start-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 24px;
+}
+.c-start-step { position: relative; }
+.c-step-num {
+    position: absolute;
+    top: -14px;
+    right: 20px;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #00C851, #4285F4);
+    color: #fff;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    z-index: 2;
+}
+.c-start-step h4 {
+    background: #fff;
+    padding: 16px 20px;
+    border-radius: 14px 14px 0 0;
+    margin: 0;
+    border: 1px solid #e8e8e8;
+    border-bottom: none;
+    font-size: 1.1rem;
+}
+.c-start-step h4 small { color: #aaa; font-weight: 400; }
+
+/* ── Code Blocks ──────────────────────────────────────────── */
+.c-code {
+    border-radius: 0 0 14px 14px;
+    overflow: hidden;
+    background: #1a1a2e;
+    border: 1px solid #2a2a3e;
+}
+.c-code-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: #12121e;
+}
+.c-code-dot { width: 12px; height: 12px; border-radius: 50%; }
+.c-code-title { margin-right: auto; margin-left: 10px; color: #555; font-size: 0.8rem; }
+.c-code pre {
+    margin: 0;
+    padding: 20px;
+    color: #d4d4d4;
+    font-size: 0.85rem;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    line-height: 1.7;
+    overflow-x: auto;
+}
+.c-code-comment { color: #6a9955; }
+.c-code-kw { color: #569cd6; }
+.c-code-type { color: #4ec9b0; }
+.c-code-fn { color: #dcdcaa; }
+
+/* ── API Reference ────────────────────────────────────────── */
+.c-api { padding: 80px 0; background: #fff; }
+.c-api-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 28px;
+}
+.c-api-group {
+    background: #fafbfc;
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid #eee;
+}
+.c-api-group h4 { font-size: 1.1rem; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+.c-api-method {
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #fff;
+    text-transform: uppercase;
+}
+.c-api-rest { background: #00C851; }
+.c-api-signalr { background: #4285F4; }
+.c-api-meta { background: #A1A092; }
+.c-api-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+    flex-wrap: wrap;
+}
+.c-api-item:last-child { border-bottom: none; }
+.c-api-item code {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #fff;
+    min-width: 52px;
+    text-align: center;
+}
+.c-api-get { background: #00C851; }
+.c-api-post { background: #4285F4; }
+.c-api-put { background: #FFBB33; color: #333 !important; }
+.c-api-del { background: #FF4444; }
+.c-api-item span { font-size: 0.85rem; font-family: monospace; color: #333; }
+.c-api-item small { font-size: 0.75rem; color: #999; width: 100%; padding-right: 62px; }
+
+/* ── Footer ───────────────────────────────────────────────── */
+.c-footer {
+    padding: 60px 0;
+    background: #0a0a0a;
+    text-align: center;
+}
+.c-footer-logo {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 12px;
+    opacity: 0.8;
+}
+.c-footer-name {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #fff;
+    margin: 0;
+}
+.c-footer-tagline { color: #555; font-size: 0.9rem; font-style: italic; margin: 4px 0 20px; }
+.c-footer-colors { display: flex; gap: 6px; justify-content: center; margin-bottom: 20px; }
+.c-footer-colors span {
+    width: 28px; height: 6px;
+    border-radius: 3px;
+    display: inline-block;
+}
+.c-footer-copy { color: #444; font-size: 0.8rem; margin: 0; }
+</style>
+
+<script>
+    // Live Cepha status check
+    (async () => {
+        const dot = document.getElementById('cepha-dot');
+        const text = document.getElementById('cepha-status-text');
+        if (!dot || !text) return;
+
+        if (window.CephaClient && window.CephaClient.connected) {
+            dot.className = 'c-status-dot online';
+            text.textContent = '✅ Connected to Cepha Server — ' + window.CephaClient.serverUrl;
+        } else {
+            try {
+                const urls = [
+                    `${window.location.protocol}//${window.location.hostname}:3000`,
+                    'http://localhost:3000'
+                ];
+                let found = false;
+                for (const url of urls) {
+                    try {
+                        const res = await fetch(`${url}/_cepha/info`, { signal: AbortSignal.timeout(2000) });
+                        if (res.ok) {
+                            const info = await res.json();
+                            dot.className = 'c-status-dot online';
+                            text.textContent = `✅ Connected — ${info.routeCount} routes, ${info.hubCount} hubs`;
+                            found = true;
+                            break;
+                        }
+                    } catch {}
+                }
+                if (!found) {
+                    dot.className = 'c-status-dot offline';
+                    text.textContent = '📴 Offline — Running locally without a server';
+                }
+            } catch {
+                dot.className = 'c-status-dot offline';
+                text.textContent = '📴 Offline';
+            }
+        }
+    })();
+
+    // Smooth scroll for anchor links
+    document.querySelectorAll('.c-btn[href^="#"]').forEach(a => {
+        a.addEventListener('click', e => {
+            e.preventDefault();
+            const target = document.querySelector(a.getAttribute('href'));
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+</script>

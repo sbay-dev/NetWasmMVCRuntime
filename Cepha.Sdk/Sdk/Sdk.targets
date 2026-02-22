@@ -1,0 +1,101 @@
+<Project>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       🧬 Cepha SDK v1.0 — Sdk.targets
+       Physarum polycephalum — Auto-imported LAST
+       ═══════════════════════════════════════════════════════════ -->
+
+  <!-- ─── Import base .NET SDK targets ─── -->
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk.WebAssembly" Condition="'$(_CephaIsClient)' == 'true'" />
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk"              Condition="'$(_CephaIsServer)' == 'true'" />
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Auto Package References
+       ═══════════════════════════════════════════════════════════ -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite"     Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
+  </ItemGroup>
+
+  <!-- Client: EF Core Design (exclude contentFiles + native — proot/Termux compatibility) -->
+  <ItemGroup Condition="'$(_CephaIsClient)' == 'true'">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; analyzers; buildtransitive</IncludeAssets>
+      <ExcludeAssets>contentFiles; native</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       SQLite Native for WASM (e_sqlite3.a)
+       Wildcard version to avoid path mismatch across SQLitePCLRaw updates
+       ═══════════════════════════════════════════════════════════ -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <NativeFileReference
+      Include="$(NuGetPackageRoot)sqlitepclraw.lib.e_sqlite3\*\runtimes\browser-wasm\nativeassets\**\e_sqlite3.a" />
+  </ItemGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Client: .cshtml as Embedded Resources (custom MVC engine)
+       ═══════════════════════════════════════════════════════════ -->
+  <ItemGroup Condition="'$(_CephaIsClient)' == 'true'">
+    <Content       Remove="Views\**\*.cshtml" />
+    <None          Remove="Views\**\*.cshtml" />
+    <RazorCompile  Remove="Views\**\*.cshtml" />
+    <EmbeddedResource Include="Views\**\*.cshtml" />
+  </ItemGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Client: JS Fingerprinting for cache busting
+       ═══════════════════════════════════════════════════════════ -->
+  <ItemGroup Condition="'$(_CephaIsClient)' == 'true'">
+    <StaticWebAssetFingerprintPattern Include="CephaJS" Pattern="*.js" Expression="#[.{fingerprint}]!" />
+  </ItemGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Global Usings — Cepha namespaces everywhere
+       ═══════════════════════════════════════════════════════════ -->
+  <ItemGroup>
+    <Using Include="WasmMvcRuntime.Abstractions" />
+    <Using Include="WasmMvcRuntime.Core" />
+    <Using Include="Microsoft.EntityFrameworkCore" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       🧬 Build Banner
+       ═══════════════════════════════════════════════════════════ -->
+  <Target Name="_CephaBuildBanner" BeforeTargets="CoreCompile">
+    <Message Importance="high" Text="🧬 Cepha SDK v$(CephaVersion) — $(CephaMode) mode — Physarum polycephalum" />
+  </Target>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       📦 Deployment Targets
+       ═══════════════════════════════════════════════════════════ -->
+
+  <!-- cepha-publish-local: Build + serve locally -->
+  <Target Name="CephaPublishLocal" DependsOnTargets="Publish">
+    <Message Importance="high" Text="🧬 Cepha: Published to $(PublishDir)" />
+    <Message Importance="high" Text="   Run: dotnet serve -p 5000 --fallback-file index.html -d $(PublishDir)wwwroot" />
+  </Target>
+
+  <!-- cepha-publish-cloudflare: Build for Cloudflare Pages -->
+  <Target Name="CephaPublishCloudflare" DependsOnTargets="Publish"
+          Condition="'$(CephaDeployCloudflare)' == 'true'">
+    <PropertyGroup>
+      <_CfOutputDir>$(PublishDir)cf-pages\</_CfOutputDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_CfOutputDir)" />
+    <Copy SourceFiles="@(PublishFiles)" DestinationFolder="$(_CfOutputDir)" />
+    <Message Importance="high" Text="🧬 Cepha: Cloudflare Pages output → $(_CfOutputDir)" />
+    <Message Importance="high" Text="   Deploy: npx wrangler pages deploy $(_CfOutputDir)" />
+  </Target>
+
+  <!-- cepha-publish-azure: Build for Azure Static Web Apps -->
+  <Target Name="CephaPublishAzure" DependsOnTargets="Publish"
+          Condition="'$(CephaDeployAzure)' == 'true'">
+    <Message Importance="high" Text="🧬 Cepha: Azure SWA output → $(PublishDir)" />
+    <Message Importance="high" Text="   Deploy: swa deploy $(PublishDir)wwwroot --env production" />
+  </Target>
+
+</Project>

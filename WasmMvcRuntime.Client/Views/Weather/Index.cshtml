@@ -1,0 +1,54 @@
+﻿@model System.Collections.Generic.List<WasmMvcRuntime.Client.Models.WeatherData>
+
+@{
+    ViewData["Title"] = "Weather";
+}
+
+<div class="weather-view">
+    <h1>Weather Data</h1>
+    <p class="text-muted">Data from SQLite database running in WebAssembly</p>
+
+    @if (Model != null)
+    {
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>#</th>
+                        <th>City</th>
+                        <th>Temperature</th>
+                        <th>Condition</th>
+                        <th>Humidity</th>
+                        <th>Wind (km/h)</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Model)
+                    {
+                        <tr>
+                            <td>@item.Id</td>
+                            <td><strong>@item.City</strong></td>
+                            <td>@item.Temperature C</td>
+                            <td>@item.Condition</td>
+                            <td>@item.Humidity%</td>
+                            <td>@item.WindSpeed</td>
+                            <td>@item.Date</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <div class="mt-3">
+        <a class="btn btn-outline-primary btn-sm" asp-controller="Home" asp-action="Index">Back to Home</a>
+        <a class="btn btn-outline-info btn-sm ms-2" asp-controller="Home" asp-action="Privacy">Privacy</a>
+    </div>
+</div>
+
+<style>
+    .weather-view { padding: 20px; }
+    .weather-view h1 { color: #667eea; margin-bottom: 0.5rem; }
+    .table th { white-space: nowrap; }
+</style>

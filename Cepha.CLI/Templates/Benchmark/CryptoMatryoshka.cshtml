@@ -1,0 +1,164 @@
+<style>
+.crypto-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.crypto-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.crypto-ctrl input[type=range]{width:120px;accent-color:#f85149}
+.crypto-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.crypto-metric{text-align:center}.crypto-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.crypto-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+.crypto-visual{position:relative;height:240px;background:#0a0a1a;border-radius:8px;border:1px solid #333;margin-bottom:12px;overflow:hidden}
+.crypto-layer{position:absolute;border-radius:50%;border:2px solid;display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:bold;color:#fff;font-family:monospace;transition:all .3s ease}
+.crypto-log{max-height:220px;overflow-y:auto;padding:10px;background:#0a0a1a;border-radius:8px;border:1px solid #333;font-family:monospace;font-size:.75rem;color:#8b949e;white-space:pre-wrap}
+.crypto-log .ok{color:#3fb950}.crypto-log .hot{color:#f0883e}.crypto-log .bad{color:#f85149}.crypto-log .enc{color:#d2a8ff}
+</style>
+<div style="max-width:1200px;margin:0 auto;">
+    <h2 style="margin:8px 0;font-size:1.2rem;">🔐 Crypto Matryoshka — Nested encryption layers</h2>
+
+    <div class="crypto-ctrl">
+        <div><label>Layers</label><br><input type="range" id="ctrlLayers" min="5" max="200" value="50"><span id="valLayers" style="color:#f85149;font-weight:bold;margin-left:4px">50</span></div>
+        <div><label>Payload KB</label><br><input type="range" id="ctrlPayload" min="1" max="512" value="64"><span id="valPayload" style="color:#f85149;font-weight:bold;margin-left:4px">64</span></div>
+        <div><label>Iterations</label><br><input type="range" id="ctrlIter" min="1" max="50" value="5"><span id="valIter" style="color:#f85149;font-weight:bold;margin-left:4px">5</span></div>
+        <button id="btnRun" style="padding:6px 16px;border:none;border-radius:6px;background:#28a745;color:#fff;font-weight:bold;cursor:pointer">▶ ENCRYPT</button>
+        <button id="btnAbort" style="padding:6px 16px;border:none;border-radius:6px;background:#dc3545;color:#fff;font-weight:bold;cursor:pointer" disabled>⏹ ABORT</button>
+    </div>
+
+    <div class="crypto-metrics">
+        <div class="crypto-metric"><div class="num" id="mFps" style="color:#3fb950">0</div><div class="lbl">Main Thread FPS</div></div>
+        <div class="crypto-metric"><div class="num" id="mLayer" style="color:#d2a8ff">0</div><div class="lbl">Current Layer</div></div>
+        <div class="crypto-metric"><div class="num" id="mEncTime" style="color:#f0883e">0</div><div class="lbl">Encrypt ms</div></div>
+        <div class="crypto-metric"><div class="num" id="mDecTime" style="color:#79c0ff">0</div><div class="lbl">Decrypt ms</div></div>
+        <div class="crypto-metric"><div class="num" id="mBytes" style="color:#d29922">0</div><div class="lbl">Processed KB</div></div>
+        <div class="crypto-metric"><div class="num" id="mVerified" style="color:#3fb950">—</div><div class="lbl">Integrity</div></div>
+    </div>
+
+    <div class="crypto-visual" id="visual"></div>
+    <div class="crypto-log" id="log">🔐 Matryoshka Encryption — Ready.\n</div>
+</div>
+
+<script>
+(function(){
+    const _bench=window.__cephaBench;
+    const isAuto=_bench&&_bench.active;
+    const duration=(_bench&&_bench.duration)||8;
+    const logEl=document.getElementById('log'),visual=document.getElementById('visual');
+    let running=false,aborted=false,fpsFrames=0,lastFpsTime=performance.now(),currentFps=60,animId;
+
+    ['ctrlLayers','ctrlPayload','ctrlIter'].forEach(id=>{
+        document.getElementById(id).oninput=function(){document.getElementById(id.replace('ctrl','val')).textContent=this.value;};
+    });
+
+    function log(msg,cls){logEl.innerHTML+=`<span class="${cls||''}">${msg}</span>\n`;logEl.scrollTop=logEl.scrollHeight;}
+
+    function fpsLoop(){fpsFrames++;const now=performance.now();
+        if(now-lastFpsTime>=500){currentFps=Math.round(fpsFrames*1000/(now-lastFpsTime));fpsFrames=0;lastFpsTime=now;
+            const el=document.getElementById('mFps');el.textContent=currentFps;el.style.color=currentFps>=50?'#3fb950':currentFps>=30?'#d29922':'#f85149';}
+        if(!aborted)animId=requestAnimationFrame(fpsLoop);}
+    animId=requestAnimationFrame(fpsLoop);
+
+    function drawMatryoshka(layer,total){
+        visual.innerHTML='';
+        const cx=visual.clientWidth/2,cy=visual.clientHeight/2;
+        const maxR=Math.min(cx,cy)-10;
+        const show=Math.min(layer,20);
+        const colors=['#f85149','#d29922','#f0883e','#3fb950','#667eea','#d2a8ff','#79c0ff','#ff6b9d','#00d4aa','#e0e0e0'];
+        for(let i=show;i>=0;i--){
+            const r=maxR*(i+1)/(show+2);
+            const div=document.createElement('div');
+            div.className='crypto-layer';
+            div.style.cssText=`width:${r*2}px;height:${r*2}px;left:${cx-r}px;top:${cy-r}px;border-color:${colors[i%colors.length]};opacity:${i===0?1:.3+.7*(1-i/show)};`;
+            if(i===0)div.textContent=`L${layer}/${total}`;
+            visual.appendChild(div);
+        }
+    }
+
+    async function runMatryoshka(){
+        if(running)return;running=true;aborted=false;
+        document.getElementById('btnRun').disabled=true;document.getElementById('btnAbort').disabled=false;
+        logEl.innerHTML='';
+        const layers=+document.getElementById('ctrlLayers').value;
+        const payloadKB=+document.getElementById('ctrlPayload').value;
+        const iterations=+document.getElementById('ctrlIter').value;
+        let totalEncTime=0,totalDecTime=0,totalBytes=0;
+
+        // Generate payload
+        const payload=new Uint8Array(payloadKB*1024);
+        crypto.getRandomValues(payload);
+        const originalHash=await sha256(payload);
+        log(`⚡ Payload: ${payloadKB}KB, Layers: ${layers}, Iterations: ${iterations}`,'hot');
+
+        for(let iter=0;iter<iterations&&!aborted;iter++){
+            log(`\n🔄 Iteration ${iter+1}/${iterations}`,'enc');
+            const keys=[];let data=payload;
+
+            // Encrypt layers (Matryoshka wrap)
+            const encStart=performance.now();
+            for(let L=0;L<layers&&!aborted;L++){
+                const key=await crypto.subtle.generateKey({name:'AES-GCM',length:256},true,['encrypt','decrypt']);
+                const iv=crypto.getRandomValues(new Uint8Array(12));
+                const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,data);
+                keys.push({key,iv});
+                data=new Uint8Array(encrypted);
+                totalBytes+=data.byteLength;
+
+                if(L%5===0||L===layers-1){
+                    document.getElementById('mLayer').textContent=L+1;
+                    drawMatryoshka(L+1,layers);
+                    await yieldFrame();
+                }
+            }
+            const encTime=performance.now()-encStart;
+            totalEncTime+=encTime;
+            document.getElementById('mEncTime').textContent=Math.round(encTime);
+            if(aborted)break;
+            log(`  🔒 Encrypted: ${layers} layers in ${encTime.toFixed(0)}ms (${(data.byteLength/1024).toFixed(1)}KB wrapped)`,'ok');
+
+            // Decrypt layers (Matryoshka unwrap)
+            const decStart=performance.now();
+            for(let L=keys.length-1;L>=0&&!aborted;L--){
+                const{key,iv}=keys[L];
+                const decrypted=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,data);
+                data=new Uint8Array(decrypted);
+                totalBytes+=data.byteLength;
+
+                if(L%5===0||L===0){
+                    document.getElementById('mLayer').textContent=L;
+                    drawMatryoshka(L,layers);
+                    await yieldFrame();
+                }
+            }
+            const decTime=performance.now()-decStart;
+            totalDecTime+=decTime;
+            document.getElementById('mDecTime').textContent=Math.round(decTime);
+
+            // Verify integrity
+            const finalHash=await sha256(data);
+            const verified=finalHash===originalHash;
+            document.getElementById('mVerified').textContent=verified?'✅ OK':'❌ FAIL';
+            document.getElementById('mVerified').style.color=verified?'#3fb950':'#f85149';
+            log(`  🔓 Decrypted: ${layers} layers in ${decTime.toFixed(0)}ms — Integrity: ${verified?'✅':'❌'}`,'ok');
+        }
+
+        document.getElementById('mBytes').textContent=Math.round(totalBytes/1024);
+        log(aborted?'\n⛔ Aborted.':
+            `\n🏁 MATRYOSHKA COMPLETE\n   Total encrypt: ${totalEncTime.toFixed(0)}ms\n   Total decrypt: ${totalDecTime.toFixed(0)}ms\n   Processed: ${(totalBytes/1024).toFixed(0)}KB\n   Main Thread FPS: ${currentFps}`,
+            aborted?'bad':'ok');
+        running=false;document.getElementById('btnRun').disabled=false;document.getElementById('btnAbort').disabled=true;
+
+        if(isAuto&&_bench){
+            _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps*1.5+iterations*5));
+            history.pushState({},'','/benchmark');
+            dispatchEvent(new PopStateEvent('popstate'));
+        }
+    }
+
+    async function sha256(data){
+        const hash=await crypto.subtle.digest('SHA-256',data);
+        return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    }
+
+    function yieldFrame(){return new Promise(r=>requestAnimationFrame(r));}
+
+    document.getElementById('btnRun').onclick=runMatryoshka;
+    document.getElementById('btnAbort').onclick=()=>{aborted=true;};
+
+    if(isAuto){document.getElementById('ctrlLayers').value=30;document.getElementById('valLayers').textContent='30';
+        document.getElementById('ctrlIter').value=2;document.getElementById('valIter').textContent='2';runMatryoshka();}
+})();
+</script>

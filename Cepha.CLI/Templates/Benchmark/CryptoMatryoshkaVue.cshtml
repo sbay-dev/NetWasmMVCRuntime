@@ -1,0 +1,196 @@
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+.crypto-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.crypto-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.crypto-ctrl input[type=range]{width:120px;accent-color:#f85149}
+.crypto-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.crypto-metric{text-align:center}.crypto-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.crypto-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+.crypto-visual{position:relative;height:240px;background:#0a0a1a;border-radius:8px;border:1px solid #333;margin-bottom:12px;overflow:hidden}
+.crypto-layer{position:absolute;border-radius:50%;border:2px solid;display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:bold;color:#fff;font-family:monospace;transition:all .3s ease}
+.crypto-log{max-height:220px;overflow-y:auto;padding:10px;background:#0a0a1a;border-radius:8px;border:1px solid #333;font-family:monospace;font-size:.75rem;color:#8b949e;white-space:pre-wrap}
+.vue-banner{background:linear-gradient(135deg,#42b883,#35495e);color:#fff;padding:6px 16px;border-radius:8px;margin-bottom:10px;font-weight:bold;font-size:.85rem;display:flex;align-items:center;gap:8px}
+</style>
+<div id="bench-root"></div>
+
+<script>
+(function(){
+const{createApp,ref,computed,onMounted,nextTick}=Vue;
+const _bench=window.__cephaBench;
+const isAuto=_bench&&_bench.active;
+const duration=(_bench&&_bench.duration)||8;
+const layerColors=['#f85149','#d29922','#f0883e','#3fb950','#667eea','#d2a8ff','#79c0ff','#ff6b9d','#00d4aa','#e0e0e0'];
+
+createApp({
+    setup(){
+        const ctrlLayers=ref(50);
+        const ctrlPayload=ref(64);
+        const ctrlIter=ref(5);
+        const running=ref(false);
+        const aborted=ref(false);
+        const currentFps=ref(0);
+        const currentLayer=ref(0);
+        const encTime=ref(0);
+        const decTime=ref(0);
+        const processedKB=ref(0);
+        const verified=ref('—');
+        const verifiedColor=ref('#3fb950');
+        const logEntries=ref([]);
+        const matryoshkaRings=ref([]);
+        let fpsFrames=0,lastFpsTime=performance.now(),animId;
+
+        const fpsColor=computed(()=>currentFps.value>=50?'#3fb950':currentFps.value>=30?'#d29922':'#f85149');
+
+        function log(msg,cls){
+            logEntries.value.push({msg,cls:cls||''});
+            nextTick(()=>{const el=document.getElementById('vueLog');if(el)el.scrollTop=el.scrollHeight;});
+        }
+
+        function fpsLoop(){
+            fpsFrames++;const now=performance.now();
+            if(now-lastFpsTime>=500){
+                currentFps.value=Math.round(fpsFrames*1000/(now-lastFpsTime));fpsFrames=0;lastFpsTime=now;
+            }
+            if(!aborted.value)animId=requestAnimationFrame(fpsLoop);
+        }
+
+        function drawMatryoshka(layer,total){
+            const el=document.getElementById('vueVisual');
+            if(!el)return;
+            const cx=el.clientWidth/2,cy=el.clientHeight/2;
+            const maxR=Math.min(cx,cy)-10;
+            const show=Math.min(layer,20);
+            const rings=[];
+            for(let i=show;i>=0;i--){
+                const r=maxR*(i+1)/(show+2);
+                rings.push({
+                    size:r*2,left:cx-r,top:cy-r,
+                    borderColor:layerColors[i%layerColors.length],
+                    opacity:i===0?1:.3+.7*(1-i/show),
+                    label:i===0?`L${layer}/${total}`:''
+                });
+            }
+            matryoshkaRings.value=rings;
+        }
+
+        function yieldFrame(){return new Promise(r=>requestAnimationFrame(r));}
+
+        async function sha256(data){
+            const hash=await crypto.subtle.digest('SHA-256',data);
+            return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+        }
+
+        async function runMatryoshka(){
+            if(running.value)return;running.value=true;aborted.value=false;
+            logEntries.value=[];
+            const layers=ctrlLayers.value;
+            const payloadKB=ctrlPayload.value;
+            const iterations=ctrlIter.value;
+            let totalEncTime=0,totalDecTime=0,totalBytes=0;
+
+            const payload=new Uint8Array(payloadKB*1024);
+            crypto.getRandomValues(payload);
+            const originalHash=await sha256(payload);
+            log(`⚡ Payload: ${payloadKB}KB, Layers: ${layers}, Iterations: ${iterations}`,'hot');
+
+            for(let iter=0;iter<iterations&&!aborted.value;iter++){
+                log(`\n🔄 Iteration ${iter+1}/${iterations}`,'enc');
+                const keys=[];let data=payload;
+
+                // Encrypt
+                const encStart=performance.now();
+                for(let L=0;L<layers&&!aborted.value;L++){
+                    const key=await crypto.subtle.generateKey({name:'AES-GCM',length:256},true,['encrypt','decrypt']);
+                    const iv=crypto.getRandomValues(new Uint8Array(12));
+                    const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,data);
+                    keys.push({key,iv});
+                    data=new Uint8Array(encrypted);
+                    totalBytes+=data.byteLength;
+                    if(L%5===0||L===layers-1){
+                        currentLayer.value=L+1;
+                        drawMatryoshka(L+1,layers);
+                        await yieldFrame();
+                    }
+                }
+                const eTime=performance.now()-encStart;
+                totalEncTime+=eTime;
+                encTime.value=Math.round(eTime);
+                if(aborted.value)break;
+                log(`  🔒 Encrypted: ${layers} layers in ${eTime.toFixed(0)}ms (${(data.byteLength/1024).toFixed(1)}KB wrapped)`,'ok');
+
+                // Decrypt
+                const decStart=performance.now();
+                for(let L=keys.length-1;L>=0&&!aborted.value;L--){
+                    const{key,iv}=keys[L];
+                    const decrypted=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,data);
+                    data=new Uint8Array(decrypted);
+                    totalBytes+=data.byteLength;
+                    if(L%5===0||L===0){
+                        currentLayer.value=L;
+                        drawMatryoshka(L,layers);
+                        await yieldFrame();
+                    }
+                }
+                const dTime=performance.now()-decStart;
+                totalDecTime+=dTime;
+                decTime.value=Math.round(dTime);
+
+                const finalHash=await sha256(data);
+                const ok=finalHash===originalHash;
+                verified.value=ok?'✅ OK':'❌ FAIL';
+                verifiedColor.value=ok?'#3fb950':'#f85149';
+                log(`  🔓 Decrypted: ${layers} layers in ${dTime.toFixed(0)}ms — Integrity: ${ok?'✅':'❌'}`,'ok');
+            }
+
+            processedKB.value=Math.round(totalBytes/1024);
+            log(aborted.value?'\n⛔ Aborted.':
+                `\n🏁 MATRYOSHKA COMPLETE\n   Total encrypt: ${totalEncTime.toFixed(0)}ms\n   Total decrypt: ${totalDecTime.toFixed(0)}ms\n   Processed: ${(totalBytes/1024).toFixed(0)}KB\n   Main Thread FPS: ${currentFps.value}`,
+                aborted.value?'bad':'ok');
+            running.value=false;
+
+            if(isAuto&&_bench){
+                _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps.value*1.5+iterations*5));
+                history.pushState({},'','/benchmark');
+                dispatchEvent(new PopStateEvent('popstate'));
+            }
+        }
+
+        onMounted(()=>{
+            animId=requestAnimationFrame(fpsLoop);
+            if(isAuto){
+                ctrlLayers.value=30;ctrlIter.value=2;
+                runMatryoshka();
+            }
+        });
+
+        return{ctrlLayers,ctrlPayload,ctrlIter,running,aborted,currentFps,currentLayer,
+            encTime,decTime,processedKB,verified,verifiedColor,logEntries,matryoshkaRings,
+            fpsColor,runMatryoshka};
+    },
+    template:`
+<div style="max-width:1200px;margin:0 auto;">
+    <div class="vue-banner">🟢 Vue 3 <span style="font-weight:normal;font-size:.75rem;">— Composition API + Reactive Proxy</span></div>
+    <h2 style="margin:8px 0;font-size:1.2rem;">🔐 Crypto Matryoshka — Nested encryption layers</h2>
+    <div class="crypto-ctrl">
+        <div><label>Layers</label><br><input type="range" v-model.number="ctrlLayers" min="5" max="200"><span style="color:#f85149;font-weight:bold;margin-left:4px">{{ctrlLayers}}</span></div>
+        <div><label>Payload KB</label><br><input type="range" v-model.number="ctrlPayload" min="1" max="512"><span style="color:#f85149;font-weight:bold;margin-left:4px">{{ctrlPayload}}</span></div>
+        <div><label>Iterations</label><br><input type="range" v-model.number="ctrlIter" min="1" max="50"><span style="color:#f85149;font-weight:bold;margin-left:4px">{{ctrlIter}}</span></div>
+        <button style="padding:6px 16px;border:none;border-radius:6px;background:#28a745;color:#fff;font-weight:bold;cursor:pointer" @click="runMatryoshka" :disabled="running">▶ ENCRYPT</button>
+        <button style="padding:6px 16px;border:none;border-radius:6px;background:#dc3545;color:#fff;font-weight:bold;cursor:pointer" @click="aborted=true" :disabled="!running">⏹ ABORT</button>
+    </div>
+    <div class="crypto-metrics">
+        <div class="crypto-metric"><div class="num" :style="{color:fpsColor}">{{currentFps}}</div><div class="lbl">Main Thread FPS</div></div>
+        <div class="crypto-metric"><div class="num" style="color:#d2a8ff">{{currentLayer}}</div><div class="lbl">Current Layer</div></div>
+        <div class="crypto-metric"><div class="num" style="color:#f0883e">{{encTime}}</div><div class="lbl">Encrypt ms</div></div>
+        <div class="crypto-metric"><div class="num" style="color:#79c0ff">{{decTime}}</div><div class="lbl">Decrypt ms</div></div>
+        <div class="crypto-metric"><div class="num" style="color:#d29922">{{processedKB}}</div><div class="lbl">Processed KB</div></div>
+        <div class="crypto-metric"><div class="num" :style="{color:verifiedColor}">{{verified}}</div><div class="lbl">Integrity</div></div>
+    </div>
+    <div class="crypto-visual" id="vueVisual">
+        <div v-for="(ring,i) in matryoshkaRings" :key="i" class="crypto-layer"
+            :style="{width:ring.size+'px',height:ring.size+'px',left:ring.left+'px',top:ring.top+'px',borderColor:ring.borderColor,opacity:ring.opacity}">{{ring.label}}</div>
+    </div>
+    <div class="crypto-log" id="vueLog"><template v-for="(entry,i) in logEntries" :key="i"><span :class="entry.cls">{{entry.msg}}</span>
+</template></div>
+</div>`
+}).mount('#bench-root');
+})();
+</script>

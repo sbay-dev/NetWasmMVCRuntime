@@ -1,0 +1,196 @@
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+.data-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.data-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.data-ctrl input[type=range]{width:130px;accent-color:#79c0ff}
+.data-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.data-metric{text-align:center}.data-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.data-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+.data-log{max-height:300px;overflow-y:auto;padding:10px;background:#0a0a1a;border-radius:8px;border:1px solid #333;font-family:monospace;font-size:.75rem;color:#8b949e;white-space:pre-wrap}
+.vue-banner{background:linear-gradient(135deg,#42b883,#35495e);color:#fff;padding:6px 16px;border-radius:8px;margin-bottom:10px;font-weight:bold;font-size:.85rem;display:flex;align-items:center;gap:8px}
+</style>
+<div id="bench-root"></div>
+
+<script>
+(function(){
+const{createApp,ref,computed,onMounted,nextTick}=Vue;
+const _bench=window.__cephaBench;
+const isAuto=_bench&&_bench.active;
+const duration=(_bench&&_bench.duration)||8;
+
+createApp({
+    setup(){
+        const ctrlRecords=ref(500000);
+        const ctrlComplexity=ref(3);
+        const running=ref(false);
+        const aborted=ref(false);
+        const currentFps=ref(0);
+        const recordCount=ref('0');
+        const opsCompleted=ref(0);
+        const throughput=ref('0');
+        const memoryMB=ref(0);
+        const elapsed=ref('0');
+        const logEntries=ref([]);
+        let fpsFrames=0,lastFpsTime=performance.now(),animId;
+
+        const fpsColor=computed(()=>currentFps.value>=50?'#3fb950':currentFps.value>=30?'#d29922':'#f85149');
+        const recordsDisplay=computed(()=>Number(ctrlRecords.value).toLocaleString());
+
+        function log(msg,cls){
+            logEntries.value.push({msg,cls:cls||''});
+            nextTick(()=>{const el=document.getElementById('vueLog');if(el)el.scrollTop=el.scrollHeight;});
+        }
+
+        function fpsLoop(){
+            fpsFrames++;const now=performance.now();
+            if(now-lastFpsTime>=500){
+                currentFps.value=Math.round(fpsFrames*1000/(now-lastFpsTime));fpsFrames=0;lastFpsTime=now;
+            }
+            animId=requestAnimationFrame(fpsLoop);
+        }
+
+        function yieldFrame(){return new Promise(r=>requestAnimationFrame(r));}
+
+        function binarySearch(arr,target){
+            let lo=0,hi=arr.length-1;
+            while(lo<=hi){const mid=(lo+hi)>>>1;if(arr[mid].score<target)lo=mid+1;else hi=mid-1;}
+            return lo;
+        }
+
+        function updateMetrics(startTime,N){
+            const el=(performance.now()-startTime)/1000;
+            throughput.value=(N/el/1000000).toFixed(2);
+            elapsed.value=el.toFixed(1);
+        }
+
+        async function runSiege(){
+            if(running.value)return;running.value=true;aborted.value=false;opsCompleted.value=0;
+            const N=ctrlRecords.value;
+            const complexity=ctrlComplexity.value;
+            const startTime=performance.now();
+            logEntries.value=[];
+
+            // Phase 1: Generate
+            log(`⚡ Generating ${N.toLocaleString()} records (complexity: ${complexity})...`,'hot');
+            await yieldFrame();
+            const data=[];const batchSize=50000;
+            for(let i=0;i<N&&!aborted.value;i++){
+                const rec={id:i,name:'User_'+i+'_'+Math.random().toString(36).substr(2,8),
+                    score:Math.random()*10000,tags:[],nested:{}};
+                for(let c=0;c<complexity;c++){
+                    rec.tags.push('tag_'+Math.floor(Math.random()*1000));
+                    rec.nested['field_'+c]={value:Math.random(),hash:Math.random().toString(36)};
+                }
+                data.push(rec);
+                if(i%batchSize===0&&i>0){
+                    recordCount.value=i.toLocaleString();
+                    elapsed.value=((performance.now()-startTime)/1000).toFixed(1);
+                    await yieldFrame();
+                }
+            }
+            if(aborted.value){finish(startTime,N);return;}
+            recordCount.value=N.toLocaleString();
+            memoryMB.value=Math.round(N*complexity*0.0005);
+            log(`✅ Generated ${N.toLocaleString()} records in ${((performance.now()-startTime)/1000).toFixed(2)}s`,'ok');
+            opsCompleted.value++;
+
+            // Phase 2: Sort
+            log('⚡ Sorting by score (Array.sort)...','hot');await yieldFrame();
+            let t0=performance.now();
+            data.sort((a,b)=>a.score-b.score);
+            log(`✅ Sort completed in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted.value++;
+            updateMetrics(startTime,N);await yieldFrame();
+
+            // Phase 3: Binary search × 10000
+            if(!aborted.value){
+                log('⚡ Running 10,000 binary searches...','hot');await yieldFrame();
+                t0=performance.now();
+                for(let s=0;s<10000&&!aborted.value;s++){binarySearch(data,Math.random()*10000);}
+                log(`✅ 10K searches in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted.value++;
+                updateMetrics(startTime,N);await yieldFrame();
+            }
+
+            // Phase 4: Filter + Map + Reduce
+            if(!aborted.value){
+                log('⚡ Filter → Map → Reduce chain...','hot');await yieldFrame();
+                t0=performance.now();
+                const result=data.filter(r=>r.score>5000).map(r=>({id:r.id,doubled:r.score*2,tagCount:r.tags.length})).reduce((sum,r)=>sum+r.doubled,0);
+                log(`✅ Chain result: ${result.toFixed(0)} in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted.value++;
+                updateMetrics(startTime,N);await yieldFrame();
+            }
+
+            // Phase 5: GroupBy
+            if(!aborted.value){
+                log('⚡ GroupBy first tag (Map accumulation)...','hot');await yieldFrame();
+                t0=performance.now();
+                const groups=new Map();
+                for(const r of data){const key=r.tags[0]||'none';if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r.id);}
+                log(`✅ ${groups.size} groups created in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted.value++;
+                updateMetrics(startTime,N);await yieldFrame();
+            }
+
+            // Phase 6: Deep clone + mutate
+            if(!aborted.value){
+                const cloneN=Math.min(N,200000);
+                log(`⚡ Deep clone + mutate ${cloneN.toLocaleString()} records...`,'hot');await yieldFrame();
+                t0=performance.now();
+                const cloned=data.slice(0,cloneN).map(r=>JSON.parse(JSON.stringify(r)));
+                for(const r of cloned)r.score*=2;
+                log(`✅ Clone+mutate in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted.value++;
+                updateMetrics(startTime,N);await yieldFrame();
+            }
+
+            // Phase 7: Reverse sort
+            if(!aborted.value){
+                log('⚡ Reverse sort by name (string comparison)...','hot');await yieldFrame();
+                t0=performance.now();
+                data.sort((a,b)=>b.name.localeCompare(a.name));
+                log(`✅ String sort in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted.value++;
+                updateMetrics(startTime,N);
+            }
+
+            finish(startTime,N);
+        }
+
+        function finish(startTime,N){
+            running.value=false;
+            const el=(performance.now()-startTime)/1000;
+            log(aborted.value?'⛔ Aborted.':'🏁 SIEGE COMPLETE — '+opsCompleted.value+' operations, '+el.toFixed(2)+'s, FPS: '+currentFps.value,aborted.value?'bad':'ok');
+            updateMetrics(startTime,N);
+            if(isAuto&&_bench){
+                _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps.value*1.5+opsCompleted.value*5));
+                history.pushState({},'','/benchmark');
+                dispatchEvent(new PopStateEvent('popstate'));
+            }
+        }
+
+        onMounted(()=>{
+            animId=requestAnimationFrame(fpsLoop);
+            if(isAuto){ctrlRecords.value=200000;runSiege();}
+        });
+
+        return{ctrlRecords,ctrlComplexity,running,aborted,currentFps,recordCount,opsCompleted,
+            throughput,memoryMB,elapsed,logEntries,fpsColor,recordsDisplay,runSiege};
+    },
+    template:`
+<div style="max-width:1200px;margin:0 auto;">
+    <div class="vue-banner">🟢 Vue 3 <span style="font-weight:normal;font-size:.75rem;">— Composition API + Reactive Proxy</span></div>
+    <h2 style="margin:8px 0;font-size:1.2rem;">🗄️ Data Siege — Million-object array operations</h2>
+    <div class="data-ctrl">
+        <div><label>Records</label><br><input type="range" v-model.number="ctrlRecords" min="10000" max="5000000" step="10000"><span style="color:#79c0ff;font-weight:bold;margin-left:4px">{{recordsDisplay}}</span></div>
+        <div><label>Complexity</label><br><input type="range" v-model.number="ctrlComplexity" min="1" max="10"><span style="color:#79c0ff;font-weight:bold;margin-left:4px">{{ctrlComplexity}}</span></div>
+        <button style="padding:6px 16px;border:none;border-radius:6px;background:#28a745;color:#fff;font-weight:bold;cursor:pointer" @click="runSiege" :disabled="running">▶ RUN SIEGE</button>
+        <button style="padding:6px 16px;border:none;border-radius:6px;background:#dc3545;color:#fff;font-weight:bold;cursor:pointer" @click="aborted=true" :disabled="!running">⏹ ABORT</button>
+    </div>
+    <div class="data-metrics">
+        <div class="data-metric"><div class="num" :style="{color:fpsColor}">{{currentFps}}</div><div class="lbl">Main Thread FPS</div></div>
+        <div class="data-metric"><div class="num" style="color:#79c0ff">{{recordCount}}</div><div class="lbl">Records</div></div>
+        <div class="data-metric"><div class="num" style="color:#f0883e">{{opsCompleted}}</div><div class="lbl">Ops Completed</div></div>
+        <div class="data-metric"><div class="num" style="color:#d2a8ff">{{throughput}}</div><div class="lbl">M Records/sec</div></div>
+        <div class="data-metric"><div class="num" style="color:#d29922">{{memoryMB}}</div><div class="lbl">Est. Memory MB</div></div>
+        <div class="data-metric"><div class="num" style="color:#e0e0e0">{{elapsed}}</div><div class="lbl">Elapsed sec</div></div>
+    </div>
+    <div class="data-log" id="vueLog"><template v-for="(entry,i) in logEntries" :key="i"><span :class="entry.cls">{{entry.msg}}</span>
+</template></div>
+</div>`
+}).mount('#bench-root');
+})();
+</script>

@@ -1,0 +1,219 @@
+<div id="bench-root"></div>
+
+<script>
+(function(){
+    const _bench=window.__cephaBench;
+    const isAuto=_bench&&_bench.active;
+    const duration=(_bench&&_bench.duration)||8;
+    let running=false,aborted=false,opsCompleted=0,fpsFrames=0,lastFpsTime=performance.now(),currentFps=60,animId;
+
+    // ── Build entire UI from JavaScript (Svelte-compiled style) ──
+    const app=document.getElementById('bench-root');
+
+    const style=document.createElement('style');
+    style.textContent=`
+.data-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.data-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.data-ctrl input[type=range]{width:130px;accent-color:#79c0ff}
+.data-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.data-metric{text-align:center}.data-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.data-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+.data-log{max-height:300px;overflow-y:auto;padding:10px;background:#0a0a1a;border-radius:8px;border:1px solid #333;font-family:monospace;font-size:.75rem;color:#8b949e;white-space:pre-wrap}
+.data-log .ok{color:#3fb950}.data-log .hot{color:#f0883e}.data-log .bad{color:#f85149}`;
+    document.head.appendChild(style);
+
+    const root=document.createElement('div');
+    root.style.cssText='max-width:1200px;margin:0 auto;';
+
+    // Banner
+    const banner=document.createElement('div');
+    banner.style.cssText='background:#f0883e;color:#fff;padding:6px 14px;border-radius:6px;margin-bottom:8px;font-weight:bold;font-size:.85rem;';
+    banner.textContent='\u{1F7E0} Vanilla JS (Svelte-compiled)';
+    root.appendChild(banner);
+
+    // Title
+    const h2=document.createElement('h2');
+    h2.style.cssText='margin:8px 0;font-size:1.2rem;';
+    h2.textContent='\u{1F5C4}\uFE0F Data Siege \u2014 Million-object array operations';
+    root.appendChild(h2);
+
+    // Controls
+    const ctrl=document.createElement('div');
+    ctrl.className='data-ctrl';
+    function makeSlider(label,id,min,max,val,step,fmt){
+        const wrap=document.createElement('div');
+        const lbl=document.createElement('label');lbl.textContent=label;
+        wrap.appendChild(lbl);wrap.appendChild(document.createElement('br'));
+        const inp=document.createElement('input');
+        inp.type='range';inp.id=id;inp.min=min;inp.max=max;inp.value=val;if(step)inp.step=step;
+        const sp=document.createElement('span');
+        sp.id=id.replace('ctrl','val');sp.style.cssText='color:#79c0ff;font-weight:bold;margin-left:4px';
+        sp.textContent=fmt?fmt(val):val;
+        inp.oninput=function(){sp.textContent=fmt?fmt(this.value):this.value;};
+        wrap.appendChild(inp);wrap.appendChild(sp);
+        return wrap;
+    }
+    ctrl.appendChild(makeSlider('Records','ctrlRecords',10000,5000000,500000,10000,v=>Number(v).toLocaleString()));
+    ctrl.appendChild(makeSlider('Complexity','ctrlComplexity',1,10,3));
+
+    const btnRun=document.createElement('button');
+    btnRun.id='btnRun';btnRun.style.cssText='padding:6px 16px;border:none;border-radius:6px;background:#28a745;color:#fff;font-weight:bold;cursor:pointer';btnRun.textContent='\u25B6 RUN SIEGE';
+    const btnAbort=document.createElement('button');
+    btnAbort.id='btnAbort';btnAbort.style.cssText='padding:6px 16px;border:none;border-radius:6px;background:#dc3545;color:#fff;font-weight:bold;cursor:pointer';btnAbort.textContent='\u23F9 ABORT';btnAbort.disabled=true;
+    ctrl.appendChild(btnRun);ctrl.appendChild(btnAbort);
+    root.appendChild(ctrl);
+
+    // Metrics
+    const metricsBar=document.createElement('div');
+    metricsBar.className='data-metrics';
+    const metricsDef=[
+        {id:'mFps',color:'#3fb950',label:'Main Thread FPS'},
+        {id:'mRecords',color:'#79c0ff',label:'Records'},
+        {id:'mOps',color:'#f0883e',label:'Ops Completed'},
+        {id:'mThroughput',color:'#d2a8ff',label:'M Records/sec'},
+        {id:'mMemory',color:'#d29922',label:'Est. Memory MB'},
+        {id:'mElapsed',color:'#e0e0e0',label:'Elapsed sec'}
+    ];
+    for(const m of metricsDef){
+        const d=document.createElement('div');d.className='data-metric';
+        const n=document.createElement('div');n.className='num';n.id=m.id;n.style.color=m.color;n.textContent='0';
+        const l=document.createElement('div');l.className='lbl';l.textContent=m.label;
+        d.appendChild(n);d.appendChild(l);metricsBar.appendChild(d);
+    }
+    root.appendChild(metricsBar);
+
+    // Log
+    const logEl=document.createElement('div');
+    logEl.className='data-log';logEl.id='log';
+    logEl.innerHTML='\u{1F5C4}\uFE0F Data Siege \u2014 Ready. Adjust records and hit RUN.\n';
+    root.appendChild(logEl);
+
+    app.appendChild(root);
+
+    // ── Siege logic (identical to original) ──
+    function log(msg,cls){logEl.innerHTML+=`<span class="${cls||''}">${msg}</span>\n`;logEl.scrollTop=logEl.scrollHeight;}
+
+    function fpsLoop(){fpsFrames++;const now=performance.now();
+        if(now-lastFpsTime>=500){currentFps=Math.round(fpsFrames*1000/(now-lastFpsTime));fpsFrames=0;lastFpsTime=now;
+            const el=document.getElementById('mFps');el.textContent=currentFps;el.style.color=currentFps>=50?'#3fb950':currentFps>=30?'#d29922':'#f85149';}
+        animId=requestAnimationFrame(fpsLoop);}
+    animId=requestAnimationFrame(fpsLoop);
+
+    async function runSiege(){
+        if(running)return;running=true;aborted=false;opsCompleted=0;
+        btnRun.disabled=true;btnAbort.disabled=false;
+        const N=+document.getElementById('ctrlRecords').value;
+        const complexity=+document.getElementById('ctrlComplexity').value;
+        const startTime=performance.now();
+        logEl.innerHTML='';
+
+        log(`\u26A1 Generating ${N.toLocaleString()} records (complexity: ${complexity})...`,'hot');
+        await yieldFrame();
+        const data=[];
+        const batchSize=50000;
+        for(let i=0;i<N&&!aborted;i++){
+            const rec={id:i,name:'User_'+i+'_'+Math.random().toString(36).substr(2,8),
+                score:Math.random()*10000,tags:[],nested:{}};
+            for(let c=0;c<complexity;c++){
+                rec.tags.push('tag_'+Math.floor(Math.random()*1000));
+                rec.nested['field_'+c]={value:Math.random(),hash:Math.random().toString(36)};
+            }
+            data.push(rec);
+            if(i%batchSize===0&&i>0){
+                document.getElementById('mRecords').textContent=(i).toLocaleString();
+                document.getElementById('mElapsed').textContent=((performance.now()-startTime)/1000).toFixed(1);
+                await yieldFrame();
+            }
+        }
+        if(aborted){finish(startTime,N);return;}
+        document.getElementById('mRecords').textContent=N.toLocaleString();
+        document.getElementById('mMemory').textContent=Math.round(N*complexity*0.0005);
+        log(`\u2705 Generated ${N.toLocaleString()} records in ${((performance.now()-startTime)/1000).toFixed(2)}s`,'ok');
+        opsCompleted++;
+
+        log('\u26A1 Sorting by score (Array.sort)...','hot');await yieldFrame();
+        let t0=performance.now();
+        data.sort((a,b)=>a.score-b.score);
+        log(`\u2705 Sort completed in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+        updateMetrics(startTime,N);await yieldFrame();
+
+        if(!aborted){
+            log('\u26A1 Running 10,000 binary searches...','hot');await yieldFrame();
+            t0=performance.now();
+            for(let s=0;s<10000&&!aborted;s++){
+                const target=Math.random()*10000;
+                binarySearch(data,target);
+            }
+            log(`\u2705 10K searches in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+            updateMetrics(startTime,N);await yieldFrame();
+        }
+
+        if(!aborted){
+            log('\u26A1 Filter \u2192 Map \u2192 Reduce chain...','hot');await yieldFrame();
+            t0=performance.now();
+            const result=data.filter(r=>r.score>5000).map(r=>({id:r.id,doubled:r.score*2,tagCount:r.tags.length})).reduce((sum,r)=>sum+r.doubled,0);
+            log(`\u2705 Chain result: ${result.toFixed(0)} in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+            updateMetrics(startTime,N);await yieldFrame();
+        }
+
+        if(!aborted){
+            log('\u26A1 GroupBy first tag (Map accumulation)...','hot');await yieldFrame();
+            t0=performance.now();
+            const groups=new Map();
+            for(const r of data){const key=r.tags[0]||'none';if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r.id);}
+            log(`\u2705 ${groups.size} groups created in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+            updateMetrics(startTime,N);await yieldFrame();
+        }
+
+        if(!aborted){
+            const cloneN=Math.min(N,200000);
+            log(`\u26A1 Deep clone + mutate ${cloneN.toLocaleString()} records...`,'hot');await yieldFrame();
+            t0=performance.now();
+            const cloned=data.slice(0,cloneN).map(r=>JSON.parse(JSON.stringify(r)));
+            for(const r of cloned)r.score*=2;
+            log(`\u2705 Clone+mutate in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+            updateMetrics(startTime,N);await yieldFrame();
+        }
+
+        if(!aborted){
+            log('\u26A1 Reverse sort by name (string comparison)...','hot');await yieldFrame();
+            t0=performance.now();
+            data.sort((a,b)=>b.name.localeCompare(a.name));
+            log(`\u2705 String sort in ${(performance.now()-t0).toFixed(1)}ms`,'ok');opsCompleted++;
+            updateMetrics(startTime,N);
+        }
+
+        finish(startTime,N);
+    }
+
+    function binarySearch(arr,target){
+        let lo=0,hi=arr.length-1;
+        while(lo<=hi){const mid=(lo+hi)>>>1;if(arr[mid].score<target)lo=mid+1;else hi=mid-1;}
+        return lo;
+    }
+
+    function updateMetrics(startTime,N){
+        const elapsed=(performance.now()-startTime)/1000;
+        document.getElementById('mOps').textContent=opsCompleted;
+        document.getElementById('mThroughput').textContent=(N/elapsed/1000000).toFixed(2);
+        document.getElementById('mElapsed').textContent=elapsed.toFixed(1);
+    }
+
+    function finish(startTime,N){
+        running=false;btnRun.disabled=false;btnAbort.disabled=true;
+        const elapsed=(performance.now()-startTime)/1000;
+        log(aborted?'\u26D4 Aborted.':'\u{1F3C1} SIEGE COMPLETE \u2014 '+opsCompleted+' operations, '+elapsed.toFixed(2)+'s, FPS: '+currentFps,aborted?'bad':'ok');
+        updateMetrics(startTime,N);
+        if(isAuto&&_bench){
+            _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps*1.5+opsCompleted*5));
+            history.pushState({},'','/benchmark');
+            dispatchEvent(new PopStateEvent('popstate'));
+        }
+    }
+
+    function yieldFrame(){return new Promise(r=>requestAnimationFrame(r));}
+
+    btnRun.onclick=runSiege;
+    btnAbort.onclick=()=>{aborted=true;};
+
+    if(isAuto){document.getElementById('ctrlRecords').value=200000;document.getElementById('valRecords').textContent='200,000';runSiege();}
+})();
+</script>

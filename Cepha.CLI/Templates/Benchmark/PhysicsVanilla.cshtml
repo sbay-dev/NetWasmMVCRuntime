@@ -1,0 +1,195 @@
+<div id="bench-root"></div>
+
+<script>
+(function(){
+    const _bench=window.__cephaBench;
+    const isAuto=_bench&&_bench.active;
+    const duration=(_bench&&_bench.duration)||8;
+    const colors=['#667eea','#f0883e','#3fb950','#f85149','#d2a8ff','#79c0ff','#d29922','#ff6b9d','#00d4aa','#e0e0e0'];
+    let running=false,animId=null,bodies=[];
+    let fpsFrames=0,lastFpsTime=performance.now(),currentFps=60,collisionsTotal=0;
+
+    // ── Build entire UI from JavaScript (Svelte-compiled style) ──
+    const app=document.getElementById('bench-root');
+
+    const style=document.createElement('style');
+    style.textContent=`
+.phys-canvas{width:100%;height:520px;background:#0a0a1a;border-radius:8px;border:1px solid #333;display:block}
+.phys-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.phys-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.phys-ctrl input[type=range]{width:110px;accent-color:#d2a8ff}
+.phys-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.phys-metric{text-align:center}.phys-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.phys-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}`;
+    document.head.appendChild(style);
+
+    const root=document.createElement('div');
+    root.style.cssText='max-width:1200px;margin:0 auto;';
+
+    // Banner
+    const banner=document.createElement('div');
+    banner.style.cssText='background:#f0883e;color:#fff;padding:6px 14px;border-radius:6px;margin-bottom:8px;font-weight:bold;font-size:.85rem;';
+    banner.textContent='\u{1F7E0} Vanilla JS (Svelte-compiled)';
+    root.appendChild(banner);
+
+    // Title
+    const h2=document.createElement('h2');
+    h2.style.cssText='margin:8px 0;font-size:1.2rem;';
+    h2.textContent='\u{1F30C} Particle Physics \u2014 N-body gravity simulation';
+    root.appendChild(h2);
+
+    // Controls
+    const ctrl=document.createElement('div');
+    ctrl.className='phys-ctrl';
+    function makeSlider(label,id,min,max,val,step){
+        const wrap=document.createElement('div');
+        const lbl=document.createElement('label');lbl.textContent=label;
+        wrap.appendChild(lbl);wrap.appendChild(document.createElement('br'));
+        const inp=document.createElement('input');
+        inp.type='range';inp.id=id;inp.min=min;inp.max=max;inp.value=val;if(step)inp.step=step;
+        const sp=document.createElement('span');
+        sp.id=id.replace('ctrl','val');sp.style.cssText='color:#d2a8ff;font-weight:bold;margin-left:4px';sp.textContent=val;
+        inp.oninput=function(){sp.textContent=this.value;};
+        wrap.appendChild(inp);wrap.appendChild(sp);
+        return wrap;
+    }
+    ctrl.appendChild(makeSlider('Bodies','ctrlBodies',50,5000,500,50));
+    ctrl.appendChild(makeSlider('Gravity','ctrlGravity',1,100,30));
+    ctrl.appendChild(makeSlider('Time Step','ctrlDt',1,50,16));
+    ctrl.appendChild(makeSlider('Trails','ctrlTrail',0,100,20));
+
+    const btnStart=document.createElement('button');
+    btnStart.id='btnStart';btnStart.style.cssText='padding:6px 16px;border:none;border-radius:6px;background:#28a745;color:#fff;font-weight:bold;cursor:pointer';btnStart.textContent='\u25B6 START';
+    const btnStop=document.createElement('button');
+    btnStop.id='btnStop';btnStop.style.cssText='padding:6px 16px;border:none;border-radius:6px;background:#dc3545;color:#fff;font-weight:bold;cursor:pointer';btnStop.textContent='\u23F9 STOP';btnStop.disabled=true;
+    ctrl.appendChild(btnStart);ctrl.appendChild(btnStop);
+    root.appendChild(ctrl);
+
+    // Metrics
+    const metricsBar=document.createElement('div');
+    metricsBar.className='phys-metrics';
+    const metricsDef=[
+        {id:'mFps',color:'#3fb950',label:'FPS'},
+        {id:'mBodies',color:'#d2a8ff',label:'Bodies'},
+        {id:'mCollisions',color:'#f0883e',label:'Collisions'},
+        {id:'mCalcs',color:'#79c0ff',label:'Calcs/frame'},
+        {id:'mEnergy',color:'#e0e0e0',label:'Kinetic Energy'},
+        {id:'mFrameTime',color:'#d29922',label:'Frame ms'}
+    ];
+    for(const m of metricsDef){
+        const d=document.createElement('div');d.className='phys-metric';
+        const n=document.createElement('div');n.className='num';n.id=m.id;n.style.color=m.color;n.textContent='0';
+        const l=document.createElement('div');l.className='lbl';l.textContent=m.label;
+        d.appendChild(n);d.appendChild(l);metricsBar.appendChild(d);
+    }
+    root.appendChild(metricsBar);
+
+    // Canvas
+    const canvas=document.createElement('canvas');
+    canvas.id='physCanvas';canvas.className='phys-canvas';
+    root.appendChild(canvas);
+
+    app.appendChild(root);
+
+    const ctx=canvas.getContext('2d');
+    function resize(){canvas.width=canvas.clientWidth;canvas.height=canvas.clientHeight;}
+    resize();window.addEventListener('resize',resize);
+
+    // ── Simulation logic (identical to original) ──
+    function init(){
+        bodies=[];
+        const n=+document.getElementById('ctrlBodies').value;
+        const W=canvas.width,H=canvas.height;
+        for(let i=0;i<n;i++){
+            bodies.push({
+                x:Math.random()*W,y:Math.random()*H,
+                vx:(Math.random()-.5)*2,vy:(Math.random()-.5)*2,
+                mass:Math.random()*3+.5,
+                r:Math.random()*2.5+1,
+                color:colors[i%colors.length]
+            });
+        }
+        collisionsTotal=0;
+    }
+
+    function tick(){
+        if(!running)return;
+        const t0=performance.now();
+        const G=+document.getElementById('ctrlGravity').value*.0001;
+        const dt=+document.getElementById('ctrlDt').value/16;
+        const trail=+document.getElementById('ctrlTrail').value/100;
+        const W=canvas.width,H=canvas.height;
+        const n=bodies.length;
+        let calcs=0,colThisFrame=0,kineticE=0;
+
+        for(let i=0;i<n;i++){
+            const a=bodies[i];
+            for(let j=i+1;j<n;j++){
+                const b=bodies[j];
+                const dx=b.x-a.x,dy=b.y-a.y;
+                const distSq=dx*dx+dy*dy+1;
+                const F=G*a.mass*b.mass/distSq;
+                const dist=Math.sqrt(distSq);
+                const fx=F*dx/dist,fy=F*dy/dist;
+                a.vx+=fx/a.mass*dt;a.vy+=fy/a.mass*dt;
+                b.vx-=fx/b.mass*dt;b.vy-=fy/b.mass*dt;
+                calcs++;
+                if(dist<a.r+b.r+2){
+                    colThisFrame++;collisionsTotal++;
+                    const nx=dx/dist,ny=dy/dist;
+                    const dvx=a.vx-b.vx,dvy=a.vy-b.vy;
+                    const dvn=dvx*nx+dvy*ny;
+                    if(dvn>0){
+                        const impulse=2*dvn/(a.mass+b.mass);
+                        a.vx-=impulse*b.mass*nx;a.vy-=impulse*b.mass*ny;
+                        b.vx+=impulse*a.mass*nx;b.vy+=impulse*a.mass*ny;
+                    }
+                }
+            }
+        }
+
+        for(const b of bodies){
+            b.x+=b.vx*dt;b.y+=b.vy*dt;
+            if(b.x<0){b.x=0;b.vx*=-.8;}if(b.x>W){b.x=W;b.vx*=-.8;}
+            if(b.y<0){b.y=0;b.vy*=-.8;}if(b.y>H){b.y=H;b.vy*=-.8;}
+            kineticE+=.5*b.mass*(b.vx*b.vx+b.vy*b.vy);
+        }
+
+        ctx.fillStyle=`rgba(10,10,26,${1-trail})`;
+        ctx.fillRect(0,0,W,H);
+        for(const b of bodies){
+            ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);
+            ctx.fillStyle=b.color;ctx.fill();
+        }
+
+        const now=performance.now();
+        fpsFrames++;
+        if(now-lastFpsTime>=500){
+            currentFps=Math.round(fpsFrames*1000/(now-lastFpsTime));
+            fpsFrames=0;lastFpsTime=now;
+            document.getElementById('mFps').textContent=currentFps;
+            document.getElementById('mFps').style.color=currentFps>=50?'#3fb950':currentFps>=30?'#d29922':'#f85149';
+        }
+        document.getElementById('mBodies').textContent=n;
+        document.getElementById('mCollisions').textContent=collisionsTotal;
+        document.getElementById('mCalcs').textContent=calcs;
+        document.getElementById('mEnergy').textContent=Math.round(kineticE);
+        document.getElementById('mFrameTime').textContent=(performance.now()-t0).toFixed(1);
+
+        animId=requestAnimationFrame(tick);
+    }
+
+    function start(){running=true;init();fpsFrames=0;lastFpsTime=performance.now();animId=requestAnimationFrame(tick);
+        btnStart.disabled=true;btnStop.disabled=false;}
+    function stop(){running=false;if(animId)cancelAnimationFrame(animId);
+        btnStart.disabled=false;btnStop.disabled=true;
+        if(isAuto&&_bench){
+            _bench.scores[_bench.currentTest]=Math.min(100,Math.round(currentFps*1.6));
+            history.pushState({},'','/benchmark');
+            dispatchEvent(new PopStateEvent('popstate'));
+        }
+    }
+    btnStart.onclick=start;
+    btnStop.onclick=stop;
+
+    if(isAuto){start();setTimeout(stop,duration*1000);}
+})();
+</script>

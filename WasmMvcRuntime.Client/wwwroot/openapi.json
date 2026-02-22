@@ -1,0 +1,308 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "WasmMvcRuntime Weather API",
+    "description": "RESTful API for weather data running entirely in Blazor WebAssembly with SQLite",
+    "version": "1.0.0",
+    "contact": {
+      "name": "WasmMvcRuntime",
+      "url": "https://github.com/sbay-dev/WasmMvcRuntime"
+    },
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "WASM Client-side (same origin)"
+    }
+  ],
+  "paths": {
+    "/api/weatherapi/getall": {
+      "get": {
+        "tags": ["Weather"],
+        "summary": "Get all weather records",
+        "description": "Returns all weather data from the SQLite database",
+        "operationId": "getAllWeather",
+        "responses": {
+          "200": {
+            "description": "List of weather records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/WeatherData" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/weatherapi/getbyid": {
+      "get": {
+        "tags": ["Weather"],
+        "summary": "Get weather record by ID",
+        "operationId": "getWeatherById",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Weather record",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WeatherData" }
+              }
+            }
+          },
+          "404": {
+            "description": "Record not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/weatherapi/getbycity": {
+      "get": {
+        "tags": ["Weather"],
+        "summary": "Get weather records by city",
+        "operationId": "getWeatherByCity",
+        "parameters": [
+          {
+            "name": "city",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of weather records for the city",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/WeatherData" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/weatherapi/getrecent": {
+      "get": {
+        "tags": ["Weather"],
+        "summary": "Get recent weather records",
+        "operationId": "getRecentWeather",
+        "parameters": [
+          {
+            "name": "count",
+            "in": "query",
+            "schema": { "type": "integer", "default": 10 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of recent weather records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/WeatherData" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/weatherapi/create": {
+      "post": {
+        "tags": ["Weather"],
+        "summary": "Create a new weather record",
+        "operationId": "createWeather",
+        "responses": {
+          "200": {
+            "description": "Created weather record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/WeatherData" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/weatherapi/update": {
+      "put": {
+        "tags": ["Weather"],
+        "summary": "Update a weather record",
+        "operationId": "updateWeather",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated weather record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/WeatherData" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Record not found"
+          }
+        }
+      }
+    },
+    "/api/weatherapi/delete": {
+      "delete": {
+        "tags": ["Weather"],
+        "summary": "Delete a weather record",
+        "operationId": "deleteWeather",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Record deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Record not found"
+          }
+        }
+      }
+    },
+    "/api/weatherapi/cities": {
+      "get": {
+        "tags": ["Cities"],
+        "summary": "Get all cities",
+        "operationId": "getAllCities",
+        "responses": {
+          "200": {
+            "description": "List of cities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/City" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/weatherapi/stats": {
+      "get": {
+        "tags": ["Statistics"],
+        "summary": "Get database statistics",
+        "operationId": "getStats",
+        "responses": {
+          "200": {
+            "description": "Database statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "totalWeatherRecords": { "type": "integer" },
+                    "totalCities": { "type": "integer" },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "WeatherData": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "description": "Unique identifier" },
+          "city": { "type": "string", "maxLength": 100, "description": "City name" },
+          "temperature": { "type": "number", "format": "double", "description": "Temperature in Celsius" },
+          "condition": { "type": "string", "maxLength": 50, "description": "Weather condition" },
+          "humidity": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "windSpeed": { "type": "number", "format": "double", "description": "Wind speed in km/h" },
+          "date": { "type": "string", "format": "date-time" }
+        },
+        "required": ["city"]
+      },
+      "City": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string", "maxLength": 100 },
+          "country": { "type": "string", "maxLength": 100 },
+          "latitude": { "type": "number", "format": "double" },
+          "longitude": { "type": "number", "format": "double" },
+          "population": { "type": "integer", "nullable": true }
+        },
+        "required": ["name"]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" },
+          "id": { "type": "integer" }
+        }
+      }
+    }
+  },
+  "tags": [
+    { "name": "Weather", "description": "Weather data operations" },
+    { "name": "Cities", "description": "City operations" },
+    { "name": "Statistics", "description": "Database statistics" }
+  ]
+}

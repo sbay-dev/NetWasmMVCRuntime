@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ═══════════════════════════════════════════════════════════
+       🧬 Cepha.Sdk — MSBuild SDK Package
+       
+       Usage:  <Project Sdk="Cepha.Sdk/1.0.0">
+       Modes:  CephaMode=Client (SPA) | Server (Node.js WASM)
+       
+       Physarum polycephalum — The intelligent slime mold
+       ═══════════════════════════════════════════════════════════ -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>Cepha.Sdk</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>sbay-dev</Authors>
+    <Description>Cepha SDK — Run ASP.NET MVC + SignalR + EF Core SQLite entirely in WebAssembly. Single project, unified build, pre-configured deployment to Local, Cloudflare, and Azure.</Description>
+    <PackageTags>cepha;wasm;webassembly;mvc;signalr;efcore;sqlite;blazor;spa</PackageTags>
+    <PackageType>MSBuildSdk</PackageType>
+    <!-- SDK packages don't produce assemblies -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+  </PropertyGroup>
+
+  <!-- Pack SDK files -->
+  <ItemGroup>
+    <None Include="Sdk\Sdk.props"   Pack="true" PackagePath="Sdk" />
+    <None Include="Sdk\Sdk.targets" Pack="true" PackagePath="Sdk" />
+  </ItemGroup>
+
+  <!-- Pack deployment templates -->
+  <ItemGroup>
+    <None Include="deploy\**\*" Pack="true" PackagePath="deploy" />
+  </ItemGroup>
+
+  <!-- Pack content templates -->
+  <ItemGroup>
+    <None Include="content\**\*" Pack="true" PackagePath="content" />
+  </ItemGroup>
+
+  <!-- Suppress build warnings -->
+  <ItemGroup>
+    <Compile Remove="**\*.cs" />
+  </ItemGroup>
+
+</Project>

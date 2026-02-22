@@ -1,0 +1,56 @@
+## .NET / C#
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.slnx
+
+## NuGet
+*.nupkg
+!local-packages/*.nupkg
+**/[Pp]ackages/*
+!**/packages/build/
+
+## Visual Studio
+.vs/
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+[Dd]ebugPublic/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Ll]og/
+[Ll]ogs/
+
+## IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+## OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+## Build results
+[Oo]bj/
+[Bb]in/
+TestResults/
+artifacts/
+
+## Publish
+publish/

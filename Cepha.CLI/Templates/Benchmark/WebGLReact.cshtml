@@ -1,0 +1,165 @@
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<style>
+.gl-canvas{width:100%;height:520px;background:#000;border-radius:8px;border:1px solid #333;display:block}
+.gl-ctrl{display:flex;gap:12px;align-items:center;padding:10px;background:#1a1a2e;border-radius:8px;border:1px solid #333;margin-bottom:12px;flex-wrap:wrap}
+.gl-ctrl label{font-size:.7rem;color:#aaa;text-transform:uppercase}.gl-ctrl input[type=range]{width:110px;accent-color:#667eea}
+.gl-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;padding:10px;background:#0d1117;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}
+.gl-metric{text-align:center}.gl-metric .num{font-size:1.4rem;font-weight:bold;font-family:monospace}.gl-metric .lbl{font-size:.6rem;color:#8b949e;text-transform:uppercase}
+</style>
+<div id="bench-root"></div>
+
+<script>
+(function(){
+const h = React.createElement;
+const {useState, useEffect, useRef, useCallback} = React;
+const _bench = window.__cephaBench;
+const isAuto = _bench && _bench.active;
+const duration = (_bench && _bench.duration) || 8;
+
+const VS=`attribute vec2 aPos;uniform float uTime;uniform float uSize;varying vec3 vColor;
+void main(){
+    float angle=uTime*.5+aPos.x*3.0;
+    vec2 p=aPos+vec2(sin(angle+aPos.y*10.0),cos(angle+aPos.x*10.0))*.15;
+    gl_Position=vec4(p,0,1);gl_PointSize=uSize;
+    vColor=vec3(.4+sin(aPos.x*5.0+uTime)*.3,.5+cos(aPos.y*7.0+uTime)*.3,.9);
+}`;
+const FS=`precision mediump float;varying vec3 vColor;
+void main(){
+    float d=length(gl_PointCoord-.5);
+    if(d>.5)discard;
+    float alpha=1.0-d*2.0;
+    gl_FragColor=vec4(vColor*alpha,alpha*.8);
+}`;
+
+function App(){
+    const [ctrlVerts, setCtrlVerts] = useState(100000);
+    const [ctrlSpeed, setCtrlSpeed] = useState(2);
+    const [running, setRunning] = useState(false);
+    const [metrics, setMetrics] = useState({fps:0,verts:0,draws:0,gpuMs:'0'});
+    const canvasRef = useRef(null);
+    const glRef = useRef(null);
+    const stateRef = useRef({running:false,fps:60,frames:0,lastFpsTime:0,draws:0,positions:null,velocities:null,count:0,program:null,timeLoc:null,sizeLoc:null,posBuffer:null});
+    const animRef = useRef(null);
+
+    const initGL = useCallback(()=>{
+        const canvas=canvasRef.current; if(!canvas) return false;
+        canvas.width=canvas.clientWidth;canvas.height=canvas.clientHeight;
+        const gl=canvas.getContext('webgl',{antialias:false,alpha:false});
+        if(!gl) return false;
+        gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+        function compile(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s;}
+        const prog=gl.createProgram();gl.attachShader(prog,compile(gl.VERTEX_SHADER,VS));gl.attachShader(prog,compile(gl.FRAGMENT_SHADER,FS));gl.linkProgram(prog);gl.useProgram(prog);
+        const s=stateRef.current;
+        s.program=prog;s.timeLoc=gl.getUniformLocation(prog,'uTime');s.sizeLoc=gl.getUniformLocation(prog,'uSize');s.posBuffer=gl.createBuffer();
+        glRef.current=gl;
+        return true;
+    },[]);
+
+    const initParticles = useCallback((n)=>{
+        const gl=glRef.current;if(!gl)return;
+        const s=stateRef.current;s.count=n;
+        s.positions=new Float32Array(n*2);s.velocities=new Float32Array(n*2);
+        for(let i=0;i<n;i++){
+            const a=Math.random()*Math.PI*2,r=Math.random()*.8;
+            s.positions[i*2]=Math.cos(a)*r;s.positions[i*2+1]=Math.sin(a)*r;
+            s.velocities[i*2]=(Math.random()-.5)*.01;s.velocities[i*2+1]=(Math.random()-.5)*.01;
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER,s.posBuffer);gl.bufferData(gl.ARRAY_BUFFER,s.positions,gl.DYNAMIC_DRAW);
+        const aPos=gl.getAttribLocation(s.program,'aPos');gl.enableVertexAttribArray(aPos);gl.vertexAttribPointer(aPos,2,gl.FLOAT,false,0,0);
+    },[]);
+
+    const tick = useCallback((time)=>{
+        const s=stateRef.current;if(!s.running)return;
+        const gl=glRef.current;if(!gl)return;
+        const t0=performance.now();
+        const turb=s.rotSpeed*.02;
+        const t=time*.001;
+        const n=s.count;
+
+        for(let i=0;i<n;i++){
+            const ix=i*2,iy=i*2+1;
+            s.velocities[ix]+=(Math.random()-.5)*turb;s.velocities[iy]+=(Math.random()-.5)*turb;
+            s.velocities[ix]-=s.positions[ix]*.001;s.velocities[iy]-=s.positions[iy]*.001;
+            s.positions[ix]+=s.velocities[ix];s.positions[iy]+=s.velocities[iy];
+            s.velocities[ix]*=.999;s.velocities[iy]*=.999;
+            if(Math.abs(s.positions[ix])>1){s.positions[ix]*=.9;s.velocities[ix]*=-.5;}
+            if(Math.abs(s.positions[iy])>1){s.positions[iy]*=.9;s.velocities[iy]*=-.5;}
+        }
+
+        gl.viewport(0,0,canvasRef.current.width,canvasRef.current.height);
+        gl.bindBuffer(gl.ARRAY_BUFFER,s.posBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,0,s.positions);
+        gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.uniform1f(s.timeLoc,t);gl.uniform1f(s.sizeLoc,2);
+        gl.drawArrays(gl.POINTS,0,n);
+        s.draws++;
+
+        const now=performance.now();
+        s.frames++;
+        if(now-s.lastFpsTime>=500){
+            s.fps=Math.round(s.frames*1000/(now-s.lastFpsTime));s.frames=0;s.lastFpsTime=now;
+            const d=s.draws;s.draws=0;
+            setMetrics({fps:s.fps,verts:n,draws:d,gpuMs:(now-t0).toFixed(1)});
+        }
+        animRef.current=requestAnimationFrame(tick);
+    },[]);
+
+    const start = useCallback(()=>{
+        if(!glRef.current&&!initGL()) return;
+        const s=stateRef.current;
+        initParticles(ctrlVerts);
+        s.rotSpeed=ctrlSpeed;s.frames=0;s.lastFpsTime=performance.now();s.fps=60;s.draws=0;s.running=true;
+        setRunning(true);
+        animRef.current=requestAnimationFrame(tick);
+    },[ctrlVerts,ctrlSpeed,initGL,initParticles,tick]);
+
+    const stop = useCallback(()=>{
+        stateRef.current.running=false;
+        setRunning(false);
+        if(animRef.current)cancelAnimationFrame(animRef.current);
+        const s=stateRef.current;
+        const score=Math.min(100,Math.round(s.fps*1.6+(s.count>80000?20:10)));
+        if(_bench&&_bench.active){
+            if(_bench.battleMode&&_bench.recordScore)_bench.recordScore('3d',score);
+            else _bench.scores['3d']=score;
+            _bench.next();
+        }
+    },[]);
+
+    useEffect(()=>{stateRef.current.rotSpeed=ctrlSpeed;},[ctrlSpeed]);
+
+    useEffect(()=>{
+        if(isAuto){setTimeout(()=>{
+            if(!glRef.current&&!initGL())return;
+            initParticles(100000);
+            const s=stateRef.current;s.rotSpeed=2;s.frames=0;s.lastFpsTime=performance.now();s.fps=60;s.draws=0;s.running=true;
+            setRunning(true);animRef.current=requestAnimationFrame(tick);
+            setTimeout(stop,duration*1000);
+        },50);}
+        return()=>{if(animRef.current)cancelAnimationFrame(animRef.current);};
+    },[]);
+
+    const fpsColor=metrics.fps>=50?'#3fb950':metrics.fps>=30?'#d29922':'#f85149';
+
+    return h('div',{style:{maxWidth:'1200px',margin:'0 auto'}},
+        h('div',{style:{background:'linear-gradient(135deg,#61dafb,#282c34)',color:'#fff',padding:'6px 16px',borderRadius:'8px',marginBottom:'10px',fontWeight:'bold',fontSize:'.85rem',display:'flex',alignItems:'center',gap:'8px'}},'⚛️ React 18 — Virtual DOM + Hooks'),
+        h('h2',{style:{margin:'8px 0',fontSize:'1.2rem'}},'💎 WebGL Forge — GPU particle storm'),
+        h('div',{className:'gl-ctrl'},
+            h('div',null,h('label',null,'Vertices'),h('br'),h('input',{type:'range',min:1000,max:200000,step:1000,value:ctrlVerts,onChange:e=>setCtrlVerts(+e.target.value)}),h('span',{style:{color:'#667eea',fontWeight:'bold',marginLeft:'4px'}},ctrlVerts.toLocaleString())),
+            h('div',null,h('label',null,'Rotation Speed'),h('br'),h('input',{type:'range',min:1,max:10,value:ctrlSpeed,onChange:e=>setCtrlSpeed(+e.target.value)}),h('span',{style:{color:'#667eea',fontWeight:'bold',marginLeft:'4px'}},ctrlSpeed)),
+            h('button',{style:{padding:'6px 16px',border:'none',borderRadius:'6px',background:'#28a745',color:'#fff',fontWeight:'bold',cursor:'pointer'},onClick:start,disabled:running},'▶ START'),
+            h('button',{style:{padding:'6px 16px',border:'none',borderRadius:'6px',background:'#dc3545',color:'#fff',fontWeight:'bold',cursor:'pointer'},onClick:stop,disabled:!running},'⏹ STOP')
+        ),
+        h('div',{className:'gl-metrics'},
+            h('div',{className:'gl-metric'},h('div',{className:'num',style:{color:fpsColor}},metrics.fps),h('div',{className:'lbl'},'FPS')),
+            h('div',{className:'gl-metric'},h('div',{className:'num',style:{color:'#667eea'}},metrics.verts.toLocaleString()),h('div',{className:'lbl'},'Vertices')),
+            h('div',{className:'gl-metric'},h('div',{className:'num',style:{color:'#f0883e'}},metrics.draws),h('div',{className:'lbl'},'Draw Calls')),
+            h('div',{className:'gl-metric'},h('div',{className:'num',style:{color:'#d2a8ff'}},metrics.gpuMs),h('div',{className:'lbl'},'GPU ms'))
+        ),
+        h('canvas',{ref:canvasRef,className:'gl-canvas'})
+    );
+}
+
+ReactDOM.createRoot(document.getElementById('bench-root')).render(h(App));
+})();
+</script>

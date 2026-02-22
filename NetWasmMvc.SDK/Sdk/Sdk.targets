@@ -1,0 +1,157 @@
+<Project>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       🧬 NetWasmMvc.SDK v1.0 — Sdk.targets
+       Auto-imported LAST in <Project Sdk="NetWasmMvc.SDK">
+       ═══════════════════════════════════════════════════════════ -->
+
+  <!-- ─── Import base WebAssembly SDK targets ─── -->
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk.WebAssembly" />
+
+  <!-- ═══ SDK Root Path ═══════════════════════════════════════ -->
+  <PropertyGroup>
+    <_NwmSdkRoot>$(MSBuildThisFileDirectory)..\</_NwmSdkRoot>
+  </PropertyGroup>
+
+  <!-- ═══ Auto Package References ═════════════════════════════ -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite"     Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"     Version="10.0.3">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; analyzers; buildtransitive</IncludeAssets>
+      <ExcludeAssets>contentFiles; native</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- ═══ Bundled Runtime DLLs (no ProjectReferences needed!) ═ -->
+  <ItemGroup>
+    <Reference Include="WasmMvcRuntime.Abstractions">
+      <HintPath>$(_NwmSdkRoot)lib\net10.0\WasmMvcRuntime.Abstractions.dll</HintPath>
+    </Reference>
+    <Reference Include="WasmMvcRuntime.Core">
+      <HintPath>$(_NwmSdkRoot)lib\net10.0\WasmMvcRuntime.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="WasmMvcRuntime.Identity">
+      <HintPath>$(_NwmSdkRoot)lib\net10.0\WasmMvcRuntime.Identity.dll</HintPath>
+    </Reference>
+    <Reference Include="WasmMvcRuntime.Data">
+      <HintPath>$(_NwmSdkRoot)lib\net10.0\WasmMvcRuntime.Data.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <!-- ═══ Shared Source Files (compiled into consumer project) ═ -->
+  <ItemGroup>
+    <Compile Include="$(_NwmSdkRoot)shared\JsInterop.cs"            Link="Cepha\JsInterop.cs"            Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\JsExports.cs"            Link="Cepha\JsExports.cs"            Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\CephaApp.cs"             Link="Cepha\CephaApp.cs"             Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\SqliteNativeResolver.cs" Link="Cepha\SqliteNativeResolver.cs" Visible="false" />
+  </ItemGroup>
+
+  <!-- ═══ SQLite Native for WASM ══════════════════════════════ -->
+  <!-- Resolve SQLitePCLRaw version dynamically to avoid hardcoded path mismatches -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <NativeFileReference
+      Include="$(NuGetPackageRoot)sqlitepclraw.lib.e_sqlite3\*\runtimes\browser-wasm\nativeassets\**\e_sqlite3.a" />
+  </ItemGroup>
+
+  <!-- ═══ .cshtml → EmbeddedResource ═════════════════════════ -->
+  <ItemGroup>
+    <Content       Remove="Views\**\*.cshtml" />
+    <None          Remove="Views\**\*.cshtml" />
+    <RazorCompile  Remove="Views\**\*.cshtml" />
+    <EmbeddedResource Include="Views\**\*.cshtml" />
+  </ItemGroup>
+
+  <!-- ═══ Areas .cshtml → EmbeddedResource ═══════════════════ -->
+  <ItemGroup>
+    <Content       Remove="Areas\**\*.cshtml" />
+    <None          Remove="Areas\**\*.cshtml" />
+    <RazorCompile  Remove="Areas\**\*.cshtml" />
+    <EmbeddedResource Include="Areas\**\*.cshtml" />
+  </ItemGroup>
+
+  <!-- ═══ JS Fingerprinting ═══════════════════════════════════ -->
+  <!-- Only _framework/*.js are fingerprinted (by WebAssembly SDK).
+       Custom JS (main.js, service-worker.js, workers) keep fixed names
+       so Service Workers and new Worker() references work correctly.
+       Integrity hashes are still provided via importmap. -->
+
+  <!-- ═══ Default wwwroot content (if consumer doesn't have them) ═ -->
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\main.js')">
+    <Content Include="$(_NwmSdkRoot)content\wwwroot\main.js"
+             Link="wwwroot\main.js"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\cepha-server.mjs')">
+    <Content Include="$(_NwmSdkRoot)content\wwwroot\cepha-server.mjs"
+             Link="wwwroot\cepha-server.mjs"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\index.html')">
+    <Content Include="$(_NwmSdkRoot)content\wwwroot\index.html"
+             Link="wwwroot\index.html"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\cepha-data-worker.js')">
+    <Content Include="$(_NwmSdkRoot)content\wwwroot\cepha-data-worker.js"
+             Link="wwwroot\cepha-data-worker.js"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\cepha-runtime-worker.js')">
+    <Content Include="$(_NwmSdkRoot)content\wwwroot\cepha-runtime-worker.js"
+             Link="wwwroot\cepha-runtime-worker.js"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- ═══ Global Usings ═══════════════════════════════════════ -->
+  <ItemGroup>
+    <Using Include="Cepha" />
+    <Using Include="WasmMvcRuntime.Abstractions" />
+    <Using Include="WasmMvcRuntime.Core" />
+    <Using Include="Microsoft.EntityFrameworkCore" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+
+  <!-- ═══ CephaKit Server Auto-Start (dev mode) ════════════ -->
+  <PropertyGroup>
+    <CephaKitEnabled Condition="'$(CephaKitEnabled)' == ''">false</CephaKitEnabled>
+    <CephaKitPort Condition="'$(CephaKitPort)' == ''">3001</CephaKitPort>
+  </PropertyGroup>
+
+  <Target Name="_CephaKitExportDevCert"
+          BeforeTargets="_CephaKitStart"
+          Condition="'$(CephaKitEnabled)' == 'true' AND '$(Configuration)' == 'Debug'">
+    <Exec Command="dotnet dev-certs https --export-path &quot;$(MSBuildProjectDirectory)\obj\cepha-dev.pem&quot; --format PEM --no-password 2&gt;nul"
+          IgnoreExitCode="true"
+          IgnoreStandardErrorWarningFormat="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low" />
+  </Target>
+
+  <Target Name="_CephaKitStart"
+          AfterTargets="Build"
+          Condition="'$(CephaKitEnabled)' == 'true' AND '$(Configuration)' == 'Debug'">
+    <PropertyGroup>
+      <_CephaKitWwwroot>$(OutputPath)wwwroot</_CephaKitWwwroot>
+      <_CephaKitScript>$(_CephaKitWwwroot)\cepha-server.mjs</_CephaKitScript>
+      <_CephaKitCert>$(MSBuildProjectDirectory)\obj\cepha-dev.pem</_CephaKitCert>
+      <_CephaKitKey>$(MSBuildProjectDirectory)\obj\cepha-dev.key</_CephaKitKey>
+    </PropertyGroup>
+    <Exec Command="cmd /c &quot;set PORT=$(CephaKitPort)&amp;&amp; set CEPHA_CERT=$(_CephaKitCert)&amp;&amp; set CEPHA_KEY=$(_CephaKitKey)&amp;&amp; start &quot;CephaKit&quot; /MIN node &quot;$(_CephaKitScript)&quot;&quot;"
+          WorkingDirectory="$(_CephaKitWwwroot)"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low" />
+    <Message Importance="high" Text="🧬 CephaKit starting on $(CephaKitPort) (HTTPS)" />
+  </Target>
+
+  <!-- ═══ Build Banner ════════════════════════════════════════ -->
+  <Target Name="_NwmBuildBanner" BeforeTargets="CoreCompile">
+    <Message Importance="high" Text="🧬 NetWasmMvc.SDK v$(NetWasmMvcVersion) — Powered by Cepha (Physarum polycephalum)" />
+  </Target>
+
+</Project>

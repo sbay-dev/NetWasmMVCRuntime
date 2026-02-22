@@ -1,0 +1,90 @@
+@{
+    ViewData["Title"] = "API Documentation";
+}
+
+<div class="api-docs">
+    <h1>Weather API Documentation</h1>
+    <p class="text-muted">OpenAPI 3.1 - RESTful API running in WebAssembly</p>
+
+    <div class="card mb-3">
+        <div class="card-header bg-success text-white">
+            <span class="badge bg-light text-success me-2">GET</span>
+            <code>/api/weatherapi/getall</code> - Get all weather records
+        </div>
+        <div class="card-body">
+            <p>Returns all weather data from the SQLite database.</p>
+            <button class="btn btn-sm btn-outline-success try-btn" data-url="/api/weatherapi/getall">Try it</button>
+            <pre class="result-box mt-2" style="display:none;"></pre>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header bg-success text-white">
+            <span class="badge bg-light text-success me-2">GET</span>
+            <code>/api/weatherapi/getrecent</code> - Get recent records
+        </div>
+        <div class="card-body">
+            <p>Returns the most recent weather records. Default count: 10.</p>
+            <button class="btn btn-sm btn-outline-success try-btn" data-url="/api/weatherapi/getrecent">Try it</button>
+            <pre class="result-box mt-2" style="display:none;"></pre>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header bg-primary text-white">
+            <span class="badge bg-light text-primary me-2">POST</span>
+            <code>/api/weatherapi/create</code> - Create a weather record
+        </div>
+        <div class="card-body">
+            <p>Creates a new random weather record for Riyadh.</p>
+            <button class="btn btn-sm btn-outline-primary try-btn" data-url="/api/weatherapi/create">Try it</button>
+            <pre class="result-box mt-2" style="display:none;"></pre>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header bg-success text-white">
+            <span class="badge bg-light text-success me-2">GET</span>
+            <code>/api/weatherapi/cities</code> - Get all cities
+        </div>
+        <div class="card-body">
+            <p>Returns all cities from the database.</p>
+            <button class="btn btn-sm btn-outline-success try-btn" data-url="/api/weatherapi/cities">Try it</button>
+            <pre class="result-box mt-2" style="display:none;"></pre>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header bg-success text-white">
+            <span class="badge bg-light text-success me-2">GET</span>
+            <code>/api/weatherapi/stats</code> - Database statistics
+        </div>
+        <div class="card-body">
+            <p>Returns total record counts and timestamp.</p>
+            <button class="btn btn-sm btn-outline-success try-btn" data-url="/api/weatherapi/stats">Try it</button>
+            <pre class="result-box mt-2" style="display:none;"></pre>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header bg-info text-white">
+            <span class="badge bg-light text-info me-2">SPEC</span>
+            <code>/openapi.json</code> - OpenAPI 3.1 specification
+        </div>
+        <div class="card-body">
+            <p>Download the full OpenAPI 3.1 specification.</p>
+            <a href="/openapi.json" target="_blank" class="btn btn-sm btn-outline-info">View JSON</a>
+        </div>
+    </div>
+
+    <div class="mt-3">
+        <a class="btn btn-outline-primary btn-sm" asp-controller="Home" asp-action="Index">Back to Home</a>
+    </div>
+</div>
+
+<style>
+    .api-docs { padding: 20px; max-width: 800px; }
+    .api-docs h1 { color: #667eea; }
+    .card-header code { color: #fff; font-size: 0.95rem; }
+    .result-box { background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; max-height: 300px; overflow: auto; font-size: 0.85rem; }
+</style>

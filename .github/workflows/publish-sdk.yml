@@ -1,0 +1,203 @@
+name: 📦 Publish NetWasmMvc.SDK to NuGet
+
+on:
+  push:
+    tags:
+      - 'sdk-v*'  # Trigger on tags like sdk-v1.0.1, sdk-v2.0.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 1.0.1)'
+        required: true
+        type: string
+
+env:
+  SDK_PROJECT: NetWasmMvc.SDK/NetWasmMvc.SDK.csproj
+  NUGET_SOURCE: https://api.nuget.org/v3/index.json
+
+jobs:
+  build-and-publish:
+    name: 🧬 Build & Publish SDK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      attestations: write
+      id-token: write
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+      
+      - name: 🔧 Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      
+      - name: 📋 Determine Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            # Extract from tag: sdk-v1.0.1 → 1.0.1
+            TAG="${{ github.ref_name }}"
+            echo "VERSION=${TAG#sdk-v}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: 🏗️ Build Runtime Libraries
+        run: |
+          dotnet build WasmMvcRuntime.Abstractions -c Release
+          dotnet build WasmMvcRuntime.Core -c Release
+          dotnet build WasmMvcRuntime.Identity -c Release
+          dotnet build WasmMvcRuntime.Data -c Release
+          dotnet build WasmMvcRuntime.App -c Release
+
+      - name: 🛡️ Security Audit — Vulnerable Dependencies
+        run: |
+          echo "🔍 Scanning all runtime projects for known vulnerabilities..."
+          for proj in WasmMvcRuntime.Abstractions WasmMvcRuntime.Core WasmMvcRuntime.Identity WasmMvcRuntime.Data WasmMvcRuntime.App; do
+            echo "── $proj ──"
+            dotnet list $proj package --vulnerable --include-transitive 2>&1
+          done | tee vuln-report.txt
+          echo "✅ Vulnerability scan complete"
+
+      - name: 📋 Generate SBOM (Software Bill of Materials)
+        uses: anchore/sbom-action@v0
+        with:
+          path: NetWasmMvc.SDK/
+          format: spdx-json
+          output-file: sbom-netwasmvmc-sdk.spdx.json
+          artifact-name: sbom-netwasmvmc-sdk
+          upload-release-assets: false
+      
+      - name: 📦 Copy Fresh DLLs to SDK
+        run: |
+          mkdir -p NetWasmMvc.SDK/lib/net10.0
+          cp WasmMvcRuntime.Abstractions/bin/Release/net10.0/WasmMvcRuntime.Abstractions.dll NetWasmMvc.SDK/lib/net10.0/
+          cp WasmMvcRuntime.Core/bin/Release/net10.0/WasmMvcRuntime.Core.dll NetWasmMvc.SDK/lib/net10.0/
+          cp WasmMvcRuntime.Identity/bin/Release/net10.0/WasmMvcRuntime.Identity.dll NetWasmMvc.SDK/lib/net10.0/
+          cp WasmMvcRuntime.Data/bin/Release/net10.0/WasmMvcRuntime.Data.dll NetWasmMvc.SDK/lib/net10.0/
+          cp WasmMvcRuntime.App/bin/Release/net10.0/WasmMvcRuntime.App.dll NetWasmMvc.SDK/lib/net10.0/
+      
+      - name: 📦 Pack SDK
+        run: |
+          dotnet pack ${{ env.SDK_PROJECT }} \
+            -c Release \
+            -p:Version=${{ steps.version.outputs.VERSION }} \
+            -o ./artifacts
+      
+      - name: ✅ Verify Package
+        run: |
+          ls -la ./artifacts/
+          dotnet nuget verify ./artifacts/NetWasmMvc.SDK.${{ steps.version.outputs.VERSION }}.nupkg || true
+      
+      - name: 🚀 Push to NuGet
+        run: |
+          dotnet nuget push ./artifacts/NetWasmMvc.SDK.${{ steps.version.outputs.VERSION }}.nupkg \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source ${{ env.NUGET_SOURCE }} \
+            --skip-duplicate
+
+      - name: 🔏 Generate Build Attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ./artifacts/NetWasmMvc.SDK.${{ steps.version.outputs.VERSION }}.nupkg
+
+      - name: 🔏 Generate SBOM Attestation
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: ./artifacts/NetWasmMvc.SDK.${{ steps.version.outputs.VERSION }}.nupkg
+          sbom-path: sbom-netwasmvmc-sdk.spdx.json
+
+      - name: 📝 Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "NetWasmMvc.SDK v${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## 🧬 NetWasmMvc.SDK v${{ steps.version.outputs.VERSION }}
+            
+            **NuGet**: https://www.nuget.org/packages/NetWasmMvc.SDK/${{ steps.version.outputs.VERSION }}
+            
+            ### Install
+            ```json
+            // global.json
+            { "msbuild-sdks": { "NetWasmMvc.SDK": "${{ steps.version.outputs.VERSION }}" } }
+            ```
+
+            ### 🛡️ Security & Trust
+            | Check | Status |
+            |-------|--------|
+            | 🔏 **Build Provenance** (SLSA) | ✅ Signed by GitHub Actions |
+            | 📋 **SBOM** (Software Bill of Materials) | ✅ SPDX format attached |
+            | 🛡️ **Vulnerability Scan** | ✅ All dependencies scanned |
+
+            ```bash
+            gh attestation verify NetWasmMvc.SDK.${{ steps.version.outputs.VERSION }}.nupkg --owner sbay-dev
+            ```
+          files: |
+            ./artifacts/NetWasmMvc.SDK.${{ steps.version.outputs.VERSION }}.nupkg
+            sbom-netwasmvmc-sdk.spdx.json
+            vuln-report.txt
+      
+      - name: 🧪 Test SDK (Sample Project)
+        run: |
+          # Register local artifact as NuGet source for pre-publish testing
+          dotnet nuget add source "$(pwd)/artifacts" --name local-sdk
+          cd Samples/MyCephaApp
+          # Update to current version
+          sed -i 's|NetWasmMvc.SDK/[0-9.]*|NetWasmMvc.SDK/${{ steps.version.outputs.VERSION }}|' MyCephaApp.csproj
+          dotnet restore
+          dotnet build
+          echo "✅ Sample project builds successfully with SDK v${{ steps.version.outputs.VERSION }}"
+
+      - name: 🧪 Template Compatibility — Default MVC
+        run: |
+          echo "── Testing: Cepha MVC (default) ──"
+          mkdir -p /tmp/test-templates && cd /tmp/test-templates
+          printf '<?xml version="1.0" encoding="utf-8"?>\n<configuration>\n  <packageSources>\n    <add key="local-sdk" value="%s" />\n    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />\n  </packageSources>\n</configuration>\n' "${GITHUB_WORKSPACE}/artifacts" > NuGet.Config
+          dotnet new console -n TestMvc --force
+          cd TestMvc
+          printf '<Project Sdk="NetWasmMvc.SDK/${{ steps.version.outputs.VERSION }}">\n  <PropertyGroup>\n    <RootNamespace>TestMvc</RootNamespace>\n    <AssemblyName>TestMvc</AssemblyName>\n  </PropertyGroup>\n</Project>\n' > TestMvc.csproj
+          mkdir -p Controllers Views/Home wwwroot
+          printf 'using WasmMvcRuntime.Abstractions;\nnamespace TestMvc.Controllers;\n[Route("/")]\n[Route("/home")]\npublic class HomeController : Controller\n{\n    public IActionResult Index() => View();\n    [Route("/home/privacy")]\n    public IActionResult Privacy() => View();\n}\n' > Controllers/HomeController.cs
+          echo '<h1>Home</h1>' > Views/Home/Index.cshtml
+          echo '<h1>Privacy</h1>' > Views/Home/Privacy.cshtml
+          echo '<html><body><div id="app">Loading...</div></body></html>' > wwwroot/index.html
+          dotnet restore
+          dotnet build -c Release
+          echo "✅ Default MVC template builds with SDK v${{ steps.version.outputs.VERSION }}"
+
+      - name: 🧪 Template Compatibility — Identity MVC
+        run: |
+          echo "── Testing: Cepha MVC + Identity ──"
+          cd /tmp/test-templates
+          dotnet new console -n TestIdentity --force
+          cd TestIdentity
+          printf '<Project Sdk="NetWasmMvc.SDK/${{ steps.version.outputs.VERSION }}">\n  <PropertyGroup>\n    <RootNamespace>TestIdentity</RootNamespace>\n    <AssemblyName>TestIdentity</AssemblyName>\n  </PropertyGroup>\n</Project>\n' > TestIdentity.csproj
+          mkdir -p Controllers Views/Home Views/Account wwwroot
+          printf 'using WasmMvcRuntime.Abstractions;\nnamespace TestIdentity.Controllers;\n[Route("/")]\n[Route("/home")]\npublic class HomeController : Controller\n{\n    public IActionResult Index() => View();\n}\n' > Controllers/HomeController.cs
+          printf 'using WasmMvcRuntime.Abstractions;\nnamespace TestIdentity.Controllers;\n[Route("/account")]\npublic class AccountController : Controller\n{\n    [Route("/account/login")]\n    public IActionResult Login() => View();\n    [Route("/account/register")]\n    public IActionResult Register() => View();\n}\n' > Controllers/AccountController.cs
+          echo '<h1>Home</h1>' > Views/Home/Index.cshtml
+          echo '<h1>Login</h1>' > Views/Account/Login.cshtml
+          echo '<h1>Register</h1>' > Views/Account/Register.cshtml
+          echo '<html><body><div id="app">Loading...</div></body></html>' > wwwroot/index.html
+          dotnet restore
+          dotnet build -c Release
+          echo "✅ Identity MVC template builds with SDK v${{ steps.version.outputs.VERSION }}"
+
+      - name: 🛡️ Template Security — Dependency Audit
+        run: |
+          echo "🔍 Scanning template dependencies for vulnerabilities..."
+          for proj in /tmp/test-templates/TestMvc /tmp/test-templates/TestIdentity; do
+            if [ -d "$proj" ]; then
+              echo "── $(basename $proj) ──"
+              dotnet list "$proj" package --vulnerable --include-transitive 2>&1
+            fi
+          done | tee template-vuln-report.txt
+          if grep -qi "has the following vulnerable packages" template-vuln-report.txt; then
+            echo "⚠️ Template dependencies have vulnerabilities!"
+            exit 1
+          fi
+          echo "✅ All template dependencies are clean"

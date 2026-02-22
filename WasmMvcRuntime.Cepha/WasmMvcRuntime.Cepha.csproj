@@ -1,0 +1,21 @@
+<Project Sdk="Cepha.Sdk">
+
+  <!-- 🧬 Cepha SDK: Server mode (Node.js WASM via CephaKit) -->
+
+  <PropertyGroup>
+    <CephaMode>Server</CephaMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components" Version="10.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WasmMvcRuntime.Abstractions\WasmMvcRuntime.Abstractions.csproj" />
+    <ProjectReference Include="..\WasmMvcRuntime.Core\WasmMvcRuntime.Core.csproj" />
+    <ProjectReference Include="..\WasmMvcRuntime.Identity\WasmMvcRuntime.Identity.csproj" />
+    <ProjectReference Include="..\WasmMvcRuntime.Data\WasmMvcRuntime.Data.csproj" />
+    <ProjectReference Include="..\WasmMvcRuntime.App\WasmMvcRuntime.App.csproj" />
+  </ItemGroup>
+
+</Project>
