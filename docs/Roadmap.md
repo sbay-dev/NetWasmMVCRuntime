@@ -4,7 +4,7 @@
 
 | Component | Version | Status |
 |-----------|---------|--------|
-| **NetWasmMvc.SDK** | 1.0.6 | ✅ Published on NuGet |
+| **NetWasmMvc.SDK** | 1.0.8 | ✅ Local (NuGet pending) |
 | **Cepha.CLI** | 1.0.48 | ✅ Published on NuGet |
 | **MVC Pipeline** | — | ✅ Controllers, Views, Routing, Areas |
 | **Razor Engine** | — | ✅ @Model, @ViewData, @if, @foreach, layouts, partials, tag helpers |
@@ -12,6 +12,8 @@
 | **Identity System** | — | ✅ PBKDF2, HMAC sessions, fingerprint binding, lockout |
 | **SignalR Engine** | — | ✅ In-process hubs, groups, client proxies |
 | **Dual Hosting** | — | ✅ Browser SPA + Node.js/Edge API |
+| **WASI Runtime** | — | ✅ wasmtime + WASI Preview 2 Component Model |
+| **WebAssembly 3.0** | — | ✅ SIMD (v128), tail calls, relaxed-SIMD — native dotnet.wasm |
 | **CLI Tooling** | — | ✅ Scaffolding, dev server, publish, interactive menu |
 | **CI/CD** | — | ✅ GitHub Actions (build, publish-sdk, publish-cli, deploy-pages) |
 
@@ -33,7 +35,7 @@
 
 | Feature | Description | Priority |
 |---------|-------------|----------|
-| **NativeAOT / Trimming** | Reduce bundle size from ~15-25MB to <5MB | High |
+| **NativeAOT / Trimming** | Reduce bundle size; `WasmBuildNative=true` already produces 3.4 MB vs 11.9 MB prebuilt | High |
 | **Roslyn view compilation** | Optional compile-time `.cshtml` processing for full Razor coverage | Medium |
 | **Streaming rendering** | `IAsyncEnumerable` support in views for progressive loading | Medium |
 | **Differential DB sync** | Sync only changed records instead of full database snapshots | Medium |
