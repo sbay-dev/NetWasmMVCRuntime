@@ -387,7 +387,7 @@ body::after {
    RESEARCH / PROPOSAL
    ═══════════════════════════════════════════════════ */
 .research-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 48px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 48px;
 }
 .research-card {
   text-align: center; padding: 40px 28px;
@@ -426,7 +426,8 @@ body::after {
    ═══════════════════════════════════════════════════ */
 @media (max-width: 900px) {
   .compare-grid, .quickstart-steps { grid-template-columns: 1fr; }
-  .features-grid, .research-grid { grid-template-columns: 1fr 1fr; }
+  .features-grid { grid-template-columns: 1fr 1fr; }
+  .research-grid { grid-template-columns: repeat(2, 1fr); }
   .arch-layer { flex-direction: column; }
   .hero-stats { gap: 32px; }
 }
@@ -465,7 +466,7 @@ body::after {
 <!-- ═══════════════ HERO ═══════════════ -->
 <section class="hero">
   <div class="container">
-    <div class="hero-badge"><span class="pulse"></span> Experimental Runtime · .NET 11 Proposal</div>
+    <div class="hero-badge"><span class="pulse"></span> SDK v1.0.17 · Cepha CLI v1.0.87 · .NET 11 Proposal</div>
     <h1>Wasm<span class="gradient">MvcRuntime</span></h1>
     <p class="hero-sub">
       Client-Side ASP.NET MVC Runtime for WebAssembly.<br>
@@ -483,7 +484,7 @@ body::after {
       <a href="#quickstart" class="btn btn-outline">Get Started →</a>
     </div>
     <div class="hero-stats">
-      <div class="hero-stat"><div class="val">6</div><div class="label">Core Modules</div></div>
+      <div class="hero-stat"><div class="val">9</div><div class="label">Core Modules</div></div>
       <div class="hero-stat"><div class="val">0</div><div class="label">Servers Required</div></div>
       <div class="hero-stat"><div class="val">&lt;50ms</div><div class="label">Navigation Latency</div></div>
       <div class="hero-stat"><div class="val">100%</div><div class="label">Offline Capable</div></div>
@@ -524,6 +525,8 @@ body::after {
           <li><span class="icon">✓</span> Same .cshtml Views — no rewrite needed</li>
           <li><span class="icon">✓</span> Identity &amp; SignalR run in-process</li>
           <li><span class="icon">✓</span> Deploy to CDN, Cloudflare, Deno, Node.js</li>
+          <li><span class="icon">✓</span> PassKey, 2FA &amp; OAuth — no server identity provider</li>
+          <li><span class="icon">✓</span> Security audit CI — identity, crypto, PCI-DSS compliance</li>
         </ul>
       </div>
     </div>
@@ -560,7 +563,7 @@ body::after {
           <div class="arch-box">
             <div class="arch-label">Runtime Worker</div>
             <div class="arch-title">.NET WASM</div>
-            <div class="arch-desc">MvcEngine · RazorTemplateEngine · EF Core + SQLite · Identity + Sessions · SignalR</div>
+            <div class="arch-desc">MvcEngine · RazorTemplateEngine · EF Core + SQLite · Identity + RBAC + 2FA · SignalR</div>
           </div>
           <div class="arch-box">
             <div class="arch-label">Data Worker</div>
@@ -625,6 +628,21 @@ body::after {
         <h3>Dual Hosting</h3>
         <p>Same code runs as a browser SPA or a Node.js/Edge API. Deploy to Cloudflare Workers, Deno, or Lambda@Edge.</p>
       </div>
+      <div class="card feature-card">
+        <div class="feature-icon">🛡️</div>
+        <h3>RBAC Authorization</h3>
+        <p>[Authorize], [AllowAnonymous], role-based access control, claims-based policies — enforced at the MvcEngine level before action invocation.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="feature-icon">🔑</div>
+        <h3>PassKey &amp; 2FA (TOTP)</h3>
+        <p>WebAuthn/FIDO2 passkey registration, RFC 6238 TOTP authenticator with real QR codes, recovery codes — following aspnetcore patterns.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="feature-icon">🧩</div>
+        <h3>Extensible Identity Builder</h3>
+        <p>Fluent AddWasmIdentity() builder: external OAuth providers, custom token providers, password policy, admin seeding — mirrors ASP.NET Core IdentityBuilder.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -652,22 +670,38 @@ body::after {
       <div class="card step-card">
         <h3>Or use the SDK directly</h3>
         <div class="code-block"><code><span class="cm">&lt;!-- MyApp.csproj --&gt;</span>
-<span class="tag">&lt;Project</span> <span class="attr">Sdk</span>=<span class="str">"NetWasmMvc.SDK/1.0.6"</span><span class="tag">&gt;</span>
+<span class="tag">&lt;Project</span> <span class="attr">Sdk</span>=<span class="str">"NetWasmMvc.SDK/1.0.17"</span><span class="tag">&gt;</span>
   <span class="tag">&lt;PropertyGroup&gt;</span>
     <span class="tag">&lt;TargetFramework&gt;</span><span class="str">net10.0</span><span class="tag">&lt;/TargetFramework&gt;</span>
   <span class="tag">&lt;/PropertyGroup&gt;</span>
 <span class="tag">&lt;/Project&gt;</span></code></div>
       </div>
       <div class="card step-card">
-        <h3>Write standard MVC code</h3>
-        <div class="code-block"><code><span class="kw">public class</span> <span class="fn">HomeController</span> : <span class="fn">Controller</span>
+        <h3>MVC + Extensible Identity</h3>
+        <div class="code-block"><code><span class="cm">// Standard MVC — works unchanged</span>
+<span class="kw">public class</span> <span class="fn">HomeController</span> : <span class="fn">Controller</span>
 {
     <span class="kw">public</span> <span class="fn">IActionResult</span> Index()
     {
         ViewData[<span class="str">"Title"</span>] = <span class="str">"Welcome"</span>;
         <span class="kw">return</span> View();
     }
-}</code></div>
+}
+
+<span class="cm">// Extensible Identity Builder</span>
+services.AddWasmIdentity(options =>
+{
+    options.Password.RequiredLength = <span class="attr">10</span>;
+    options.TwoFactor.EnableAuthenticator = <span class="attr">true</span>;
+    options.SeedAdmin(<span class="str">"admin@cepha.local"</span>, <span class="str">"Admin@Cepha!2025"</span>);
+})
+.AddPassKeys()
+.AddExternalProvider(<span class="str">"Google"</span>, p =>
+{
+    p.ClientId = <span class="str">"your-client-id"</span>;
+    p.ClientSecret = <span class="str">"your-secret"</span>;
+})
+.AddDefaultTokenProviders();</code></div>
       </div>
       <div class="card step-card">
         <h3>Build &amp; deploy as static files</h3>
@@ -712,6 +746,31 @@ body::after {
       <div class="roadmap-item done">
         <div class="rm-title">CLI Tooling &amp; Dual Hosting</div>
         <div class="rm-desc">Cepha.CLI scaffolding, dev server, Node.js/Edge API hosting</div>
+        <span class="rm-tag complete">Complete</span>
+      </div>
+      <div class="roadmap-item done">
+        <div class="rm-title">RBAC Authorization &amp; Identity Builder</div>
+        <div class="rm-desc">Fluent WasmIdentityBuilder, [Authorize]/[AllowAnonymous] attributes, role-based policies, admin seeding, external provider support</div>
+        <span class="rm-tag complete">Complete</span>
+      </div>
+      <div class="roadmap-item done">
+        <div class="rm-title">PassKey (WebAuthn) &amp; TOTP 2FA</div>
+        <div class="rm-desc">FIDO2 passkey registration, RFC 6238 authenticator with QR codes, recovery codes, custom token providers</div>
+        <span class="rm-tag complete">Complete</span>
+      </div>
+      <div class="roadmap-item done">
+        <div class="rm-title">WebAssembly 3.0 (SIMD + Tail-Call)</div>
+        <div class="rm-desc">SIMD v128, relaxed SIMD, tail-call optimization — validated with wasm-tools and wasmtime</div>
+        <span class="rm-tag complete">Complete</span>
+      </div>
+      <div class="roadmap-item done">
+        <div class="rm-title">Security Audit CI Pipeline</div>
+        <div class="rm-desc">GitHub Actions: identity compliance (14 checks), crypto compliance (7 checks), PCI-DSS v4.0 (25+ checks) — all passing</div>
+        <span class="rm-tag complete">Complete</span>
+      </div>
+      <div class="roadmap-item done">
+        <div class="rm-title">WASI Crypto Fallback</div>
+        <div class="rm-desc">Pure managed SHA-256 (FIPS 180-4), HMAC-SHA256 (RFC 2104), HKDF-SHA256, PBKDF2-SHA256 for WASI environments</div>
         <span class="rm-tag complete">Complete</span>
       </div>
       <div class="roadmap-item planned">
@@ -768,6 +827,12 @@ body::after {
         <h3>Security Model</h3>
         <p>PBKDF2 hashing, HMAC session tokens, IdentityAtom binary protocol, fingerprint binding, threat mitigations.</p>
         <span class="r-link">Read security model <span>→</span></span>
+      </a>
+      <a href="https://github.com/sbay-dev/WasmMvcRuntime/actions" class="card research-card" target="_blank">
+        <div class="r-icon">🛡️</div>
+        <h3>Security Compliance</h3>
+        <p>CI pipeline with 46+ automated checks: identity standards, cryptographic compliance, PCI-DSS v4.0 audit trail.</p>
+        <span class="r-link">View audit workflow <span>→</span></span>
       </a>
     </div>
   </div>
