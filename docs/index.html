@@ -466,7 +466,7 @@ body::after {
 <!-- ═══════════════ HERO ═══════════════ -->
 <section class="hero">
   <div class="container">
-    <div class="hero-badge"><span class="pulse"></span> SDK v1.0.18 · Cepha CLI v1.0.88 · .NET 11 Proposal</div>
+    <div class="hero-badge"><span class="pulse"></span> SDK v1.0.19 · Cepha CLI v1.0.89 · .NET 11 Proposal</div>
     <h1>Wasm<span class="gradient">MvcRuntime</span></h1>
     <p class="hero-sub">
       Client-Side ASP.NET MVC Runtime for WebAssembly.<br>
@@ -648,6 +648,11 @@ body::after {
         <h3>Visual Studio F5 Debug</h3>
         <p>Full Visual Studio debugging with pre-configured launchSettings.json — press F5 and debug your WASM MVC app with breakpoints, watch, and hot reload.</p>
       </div>
+      <div class="card feature-card">
+        <div class="feature-icon">📋</div>
+        <h3>SDK Compliance Directives</h3>
+        <p>All 70 source files enforce strict ASP.NET Core API fidelity. AI-assisted code generation must consult SDK_DEVELOPMENT_STANDARDS.md — zero deviation from the official surface.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -675,7 +680,7 @@ body::after {
       <div class="card step-card">
         <h3>Or use the SDK directly</h3>
         <div class="code-block"><code><span class="cm">&lt;!-- MyApp.csproj --&gt;</span>
-<span class="tag">&lt;Project</span> <span class="attr">Sdk</span>=<span class="str">"NetWasmMvc.SDK/1.0.18"</span><span class="tag">&gt;</span>
+<span class="tag">&lt;Project</span> <span class="attr">Sdk</span>=<span class="str">"NetWasmMvc.SDK/1.0.19"</span><span class="tag">&gt;</span>
   <span class="tag">&lt;PropertyGroup&gt;</span>
     <span class="tag">&lt;TargetFramework&gt;</span><span class="str">net10.0</span><span class="tag">&lt;/TargetFramework&gt;</span>
   <span class="tag">&lt;/PropertyGroup&gt;</span>
@@ -788,6 +793,16 @@ services.AddWasmIdentity(options =>
         <div class="rm-desc">True HMAC-SHA1 TOTP with QR code generation, Base32 secrets, recovery codes, and authenticator app integration</div>
         <span class="rm-tag complete">Complete</span>
       </div>
+      <div class="roadmap-item done">
+        <div class="rm-title">Full ActionResults API Surface</div>
+        <div class="rm-desc">12 new result types (BadRequest, Unauthorized, Forbid, NoContent, Conflict, Created, Accepted, etc.) + 14 new ControllerBase methods — matching official ASP.NET Core API</div>
+        <span class="rm-tag complete">Complete</span>
+      </div>
+      <div class="roadmap-item done">
+        <div class="rm-title">Strict SDK Compliance Directives</div>
+        <div class="rm-desc">All 70 source files carry mandatory compliance headers enforcing ASP.NET Core API fidelity. AI-assisted development must consult SDK_DEVELOPMENT_STANDARDS.md before any modification</div>
+        <span class="rm-tag complete">Complete</span>
+      </div>
       <div class="roadmap-item planned">
         <div class="rm-title">NativeAOT / Trimming</div>
         <div class="rm-desc">Reduce bundle from ~15-25MB to &lt;5MB with ahead-of-time compilation</div>
@@ -801,11 +816,6 @@ services.AddWasmIdentity(options =>
       <div class="roadmap-item planned">
         <div class="rm-title">Blazor Interop &amp; MAUI WebView</div>
         <div class="rm-desc">Embed MVC views in Blazor components, ship inside native apps</div>
-        <span class="rm-tag future">Future</span>
-      </div>
-      <div class="roadmap-item planned">
-        <div class="rm-title">F5 Debugging &amp; VS Code Integration</div>
-        <div class="rm-desc">Attach debugger to WASM Worker, breakpoints in Controllers</div>
         <span class="rm-tag future">Future</span>
       </div>
     </div>
