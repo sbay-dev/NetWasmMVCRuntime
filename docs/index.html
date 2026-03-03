@@ -466,7 +466,7 @@ body::after {
 <!-- ═══════════════ HERO ═══════════════ -->
 <section class="hero">
   <div class="container">
-    <div class="hero-badge"><span class="pulse"></span> SDK v1.0.19 · Cepha CLI v1.0.89 · .NET 11 Proposal</div>
+    <div class="hero-badge"><span class="pulse"></span> SDK v1.0.20 · Cepha CLI v1.0.90 · .NET 11 Proposal</div>
     <h1>Wasm<span class="gradient">MvcRuntime</span></h1>
     <p class="hero-sub">
       Client-Side ASP.NET MVC Runtime for WebAssembly.<br>
@@ -653,6 +653,11 @@ body::after {
         <h3>SDK Compliance Directives</h3>
         <p>All 70 source files enforce strict ASP.NET Core API fidelity. AI-assisted code generation must consult SDK_DEVELOPMENT_STANDARDS.md — zero deviation from the official surface.</p>
       </div>
+      <div class="card feature-card">
+        <div class="feature-icon">🌊</div>
+        <h3>Streaming Views &amp; SignalR</h3>
+        <p>[StreamingResponse] for NDJSON/SSE IAsyncEnumerable rendering. SignalR stream protocol with char-by-char chat demo. Opt-in per action — default buffered for safety.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -680,7 +685,7 @@ body::after {
       <div class="card step-card">
         <h3>Or use the SDK directly</h3>
         <div class="code-block"><code><span class="cm">&lt;!-- MyApp.csproj --&gt;</span>
-<span class="tag">&lt;Project</span> <span class="attr">Sdk</span>=<span class="str">"NetWasmMvc.SDK/1.0.19"</span><span class="tag">&gt;</span>
+<span class="tag">&lt;Project</span> <span class="attr">Sdk</span>=<span class="str">"NetWasmMvc.SDK/1.0.20"</span><span class="tag">&gt;</span>
   <span class="tag">&lt;PropertyGroup&gt;</span>
     <span class="tag">&lt;TargetFramework&gt;</span><span class="str">net10.0</span><span class="tag">&lt;/TargetFramework&gt;</span>
   <span class="tag">&lt;/PropertyGroup&gt;</span>
@@ -808,10 +813,10 @@ services.AddWasmIdentity(options =>
         <div class="rm-desc">Reduce bundle from ~15-25MB to &lt;5MB with ahead-of-time compilation</div>
         <span class="rm-tag next">Up Next</span>
       </div>
-      <div class="roadmap-item planned">
-        <div class="rm-title">Streaming Views &amp; Model Binding</div>
-        <div class="rm-desc">IAsyncEnumerable rendering, automatic form-to-parameter binding</div>
-        <span class="rm-tag next">Planned</span>
+      <div class="roadmap-item done">
+        <div class="rm-title">Streaming Views &amp; SignalR Streaming</div>
+        <div class="rm-desc">IAsyncEnumerable rendering (NDJSON/SSE), [StreamingResponse]/[BufferedResponse] attributes, SignalR stream protocol, streaming chat demo</div>
+        <span class="rm-tag done">Complete</span>
       </div>
       <div class="roadmap-item planned">
         <div class="rm-title">Blazor Interop &amp; MAUI WebView</div>
