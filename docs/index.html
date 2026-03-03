@@ -466,7 +466,7 @@ body::after {
 <!-- ═══════════════ HERO ═══════════════ -->
 <section class="hero">
   <div class="container">
-    <div class="hero-badge"><span class="pulse"></span> SDK v1.0.17 · Cepha CLI v1.0.87 · .NET 11 Proposal</div>
+    <div class="hero-badge"><span class="pulse"></span> SDK v1.0.18 · Cepha CLI v1.0.88 · .NET 11 Proposal</div>
     <h1>Wasm<span class="gradient">MvcRuntime</span></h1>
     <p class="hero-sub">
       Client-Side ASP.NET MVC Runtime for WebAssembly.<br>
@@ -643,6 +643,11 @@ body::after {
         <h3>Extensible Identity Builder</h3>
         <p>Fluent AddWasmIdentity() builder: external OAuth providers, custom token providers, password policy, admin seeding — mirrors ASP.NET Core IdentityBuilder.</p>
       </div>
+      <div class="card feature-card">
+        <div class="feature-icon">🖥️</div>
+        <h3>Visual Studio F5 Debug</h3>
+        <p>Full Visual Studio debugging with pre-configured launchSettings.json — press F5 and debug your WASM MVC app with breakpoints, watch, and hot reload.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -670,7 +675,7 @@ body::after {
       <div class="card step-card">
         <h3>Or use the SDK directly</h3>
         <div class="code-block"><code><span class="cm">&lt;!-- MyApp.csproj --&gt;</span>
-<span class="tag">&lt;Project</span> <span class="attr">Sdk</span>=<span class="str">"NetWasmMvc.SDK/1.0.17"</span><span class="tag">&gt;</span>
+<span class="tag">&lt;Project</span> <span class="attr">Sdk</span>=<span class="str">"NetWasmMvc.SDK/1.0.18"</span><span class="tag">&gt;</span>
   <span class="tag">&lt;PropertyGroup&gt;</span>
     <span class="tag">&lt;TargetFramework&gt;</span><span class="str">net10.0</span><span class="tag">&lt;/TargetFramework&gt;</span>
   <span class="tag">&lt;/PropertyGroup&gt;</span>
@@ -771,6 +776,16 @@ services.AddWasmIdentity(options =>
       <div class="roadmap-item done">
         <div class="rm-title">WASI Crypto Fallback</div>
         <div class="rm-desc">Pure managed SHA-256 (FIPS 180-4), HMAC-SHA256 (RFC 2104), HKDF-SHA256, PBKDF2-SHA256 for WASI environments</div>
+        <span class="rm-tag complete">Complete</span>
+      </div>
+      <div class="roadmap-item done">
+        <div class="rm-title">Visual Studio F5 Debug</div>
+        <div class="rm-desc">Pre-configured launchSettings.json with HTTPS:5001/HTTP:5000 — press F5 to debug with breakpoints, IIS Express, and Blazor WASM inspector</div>
+        <span class="rm-tag complete">Complete</span>
+      </div>
+      <div class="roadmap-item done">
+        <div class="rm-title">Real TOTP 2FA (RFC 6238)</div>
+        <div class="rm-desc">True HMAC-SHA1 TOTP with QR code generation, Base32 secrets, recovery codes, and authenticator app integration</div>
         <span class="rm-tag complete">Complete</span>
       </div>
       <div class="roadmap-item planned">
