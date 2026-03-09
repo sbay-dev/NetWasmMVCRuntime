@@ -124,6 +124,46 @@ Key source files: [`MvcEngine.cs`](https://github.com/sbay-dev/WasmMvcRuntime/bl
 
 ---
 
+## Known .NET Runtime Gaps (Active)
+
+The following issues are currently open in the .NET runtime repositories and directly affect this proposal. Cepha (`Cepha.CLI` + `NetWasmMvc.SDK`) was built to bridge these gaps while the .NET team evaluates official support.
+
+### 🐛 Visual Studio Publish: Empty Output Folder for `browser-wasm`
+
+When publishing a `browser-wasm` project from Visual Studio's Publish dialog, the destination folder is **completely empty** — no `_framework/`, no `wwwroot/`, no `index.html`. The same project publishes correctly via `dotnet publish -c Release` from the command line.
+
+This is a critical tooling gap: enterprise developers expect Visual Studio's integrated Publish workflow to produce deployable output. Today it produces nothing for WebAssembly MVC projects.
+
+- **Tracked:** [NetWasmMVCRuntime #39](https://github.com/sbay-dev/NetWasmMVCRuntime/issues/39)
+- **Workaround:** Use `dotnet publish` or `cepha publish` from the command line
+
+### 📋 dotnet/runtime #125136 — No Client-Side MVC Runtime
+
+The core issue: .NET provides no SDK target, no `MvcEngine`, and no Razor template contract for running MVC in WebAssembly. The entire MVC pipeline assumes a server host — there is no `Microsoft.NET.Sdk.WebAssembly.Mvc`. This issue has been acknowledged and placed in the **Future** milestone.
+
+- **Issue:** [dotnet/runtime #125136](https://github.com/dotnet/runtime/issues/125136)
+- **Status:** Open · Milestone: Future · Labels: `area-Meta`, `os-browser`
+
+### 💬 dotnet/runtime Discussion #125144 — Community Feedback
+
+The companion discussion seeking community input on whether client-side MVC for WebAssembly should be officially supported. Covers bundle size concerns, NativeAOT timeline, edge deployment interest, and the relationship with Blazor.
+
+- **Discussion:** [dotnet/runtime #125144](https://github.com/dotnet/runtime/discussions/125144)
+- **Key question:** Should this start as an experimental SDK — similar to how Blazor began?
+
+### 🧬 Cepha: The Bridge
+
+While these issues remain open, **Cepha provides a complete solution today**: a custom SDK target, a lightweight MvcEngine, a Razor template engine, CLI tooling (`cepha dev` / `cepha publish`), and correct `dotnet publish` output for `browser-wasm`. Cepha solves today what the .NET team has acknowledged as a gap for .NET 11+.
+
+```bash
+# Install and start building now
+dotnet tool install --global Cepha.CLI
+cepha new MyApp
+cepha dev
+```
+
+---
+
 ## Call for Feedback
 
 We'd love to hear from the community and the .NET team:

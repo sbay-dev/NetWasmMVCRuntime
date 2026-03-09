@@ -466,7 +466,7 @@ body::after {
 <!-- ═══════════════ HERO ═══════════════ -->
 <section class="hero">
   <div class="container">
-    <div class="hero-badge"><span class="pulse"></span> SDK v1.0.20 · Cepha CLI v1.0.90 · .NET 11 Proposal</div>
+    <div class="hero-badge"><span class="pulse"></span> SDK v1.0.52 · Cepha CLI v1.0.129 · .NET 11 Proposal</div>
     <h1>Wasm<span class="gradient">MvcRuntime</span></h1>
     <p class="hero-sub">
       Client-Side ASP.NET MVC Runtime for WebAssembly.<br>
@@ -864,6 +864,118 @@ services.AddWasmIdentity(options =>
         <p>CI pipeline with 46+ automated checks: identity standards, cryptographic compliance, PCI-DSS v4.0 audit trail.</p>
         <span class="r-link">View audit workflow <span>→</span></span>
       </a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ KNOWN RUNTIME ISSUES ═══════════════ -->
+<section class="section" id="runtime-issues">
+  <div class="container">
+    <div class="reveal">
+      <div class="section-label">⚠️ Active .NET Runtime Gaps</div>
+      <h2 class="section-title">Why Cepha exists — and what remains open.</h2>
+      <p class="section-sub">
+        The .NET WebAssembly toolchain has critical gaps that prevent MVC apps from publishing correctly
+        via Visual Studio. Cepha (<code>Cepha.CLI</code> + <code>NetWasmMvc.SDK</code>) was built to bridge these gaps.
+        The following issues remain open in the .NET runtime and directly affect this proposal.
+      </p>
+    </div>
+
+    <div class="comparison-grid reveal">
+      <!-- Issue 1: VS Publish Empty Output -->
+      <div class="card" style="border-left: 4px solid #ef4444;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+          <span style="font-size:24px;">🐛</span>
+          <h3 style="margin:0; font-size:18px;">Visual Studio Publish: Empty Output Folder</h3>
+        </div>
+        <p style="color:var(--text-secondary); font-size:14px; line-height:1.7;">
+          When publishing a <code>browser-wasm</code> project from Visual Studio's Publish dialog,
+          the destination folder is <strong>completely empty</strong> — no <code>_framework/</code>,
+          no <code>wwwroot/</code>, no <code>index.html</code>. The same project publishes correctly
+          via <code>dotnet publish -c Release</code> from the command line.
+        </p>
+        <p style="color:var(--text-secondary); font-size:13px; margin-top:8px;">
+          <strong>Impact:</strong> Developers cannot use Visual Studio's standard Publish workflow
+          for WebAssembly MVC apps. This is a fundamental tooling gap that prevents adoption in
+          enterprise environments where VS-integrated deployment is expected.
+        </p>
+        <div style="margin-top:12px;">
+          <a href="https://github.com/sbay-dev/NetWasmMVCRuntime/issues/39" target="_blank"
+             style="color:var(--accent); font-size:13px; text-decoration:none;">
+            📌 NetWasmMVCRuntime #39 — Tracked Issue →
+          </a>
+        </div>
+      </div>
+
+      <!-- Issue 2: dotnet/runtime #125136 -->
+      <div class="card" style="border-left: 4px solid #f59e0b;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+          <span style="font-size:24px;">📋</span>
+          <h3 style="margin:0; font-size:18px;">Client-Side ASP.NET MVC Runtime for WebAssembly</h3>
+        </div>
+        <p style="color:var(--text-secondary); font-size:14px; line-height:1.7;">
+          The core proposal filed in <code>dotnet/runtime</code>. .NET currently provides no SDK target,
+          no <code>MvcEngine</code>, and no Razor template contract for running MVC in WebAssembly.
+          The entire MVC pipeline assumes a server host — there is no
+          <code>Microsoft.NET.Sdk.WebAssembly.Mvc</code>.
+        </p>
+        <p style="color:var(--text-secondary); font-size:13px; margin-top:8px;">
+          <strong>Status:</strong> Open · Milestone: <em>Future</em> · Labels: <code>area-Meta</code>, <code>os-browser</code>
+        </p>
+        <div style="margin-top:12px;">
+          <a href="https://github.com/dotnet/runtime/issues/125136" target="_blank"
+             style="color:var(--accent); font-size:13px; text-decoration:none;">
+            🔗 dotnet/runtime #125136 — View Issue →
+          </a>
+        </div>
+      </div>
+
+      <!-- Issue 3: dotnet/runtime Discussion #125144 -->
+      <div class="card" style="border-left: 4px solid #8b5cf6;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+          <span style="font-size:24px;">💬</span>
+          <h3 style="margin:0; font-size:18px;">Community Discussion: MVC WASM Feasibility</h3>
+        </div>
+        <p style="color:var(--text-secondary); font-size:14px; line-height:1.7;">
+          The companion discussion in <code>dotnet/runtime</code> seeking community feedback on whether
+          client-side MVC for WebAssembly should be officially supported. Covers bundle size concerns,
+          NativeAOT timeline, edge deployment interest, and the relationship with Blazor.
+        </p>
+        <p style="color:var(--text-secondary); font-size:13px; margin-top:8px;">
+          <strong>Key question:</strong> Should this start as an experimental SDK — similar to how Blazor
+          began — to let the community validate the model before full investment?
+        </p>
+        <div style="margin-top:12px;">
+          <a href="https://github.com/dotnet/runtime/discussions/125144" target="_blank"
+             style="color:var(--accent); font-size:13px; text-decoration:none;">
+            🔗 dotnet/runtime #125144 — Join Discussion →
+          </a>
+        </div>
+      </div>
+
+      <!-- Cepha's Answer -->
+      <div class="card" style="border-left: 4px solid #22c55e;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+          <span style="font-size:24px;">🧬</span>
+          <h3 style="margin:0; font-size:18px;">Cepha: The Bridge Until .NET Closes the Gap</h3>
+        </div>
+        <p style="color:var(--text-secondary); font-size:14px; line-height:1.7;">
+          While these runtime issues remain open, <strong>Cepha</strong> provides a complete solution today:
+          a custom SDK target (<code>NetWasmMvc.SDK</code>), a lightweight MvcEngine, a Razor template engine,
+          CLI tooling with <code>cepha dev</code> / <code>cepha publish</code>, and correct
+          <code>dotnet publish</code> output for <code>browser-wasm</code>.
+        </p>
+        <p style="color:var(--text-secondary); font-size:13px; margin-top:8px;">
+          <strong>Cepha solves today what the .NET team has acknowledged as a gap for .NET 11+.</strong>
+          Install <code>Cepha.CLI</code> and start building MVC WebAssembly apps now — no server required.
+        </p>
+        <div style="margin-top:12px;">
+          <a href="https://www.nuget.org/packages/Cepha.CLI" target="_blank"
+             style="color:var(--accent); font-size:13px; text-decoration:none;">
+            📦 Install Cepha.CLI from NuGet →
+          </a>
+        </div>
+      </div>
     </div>
   </div>
 </section>
