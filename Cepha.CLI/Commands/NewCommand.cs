@@ -569,6 +569,7 @@ public class AccountController : Controller
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#667eea" />
+    <meta name="color-scheme" content="light dark" />
     <title>{{name}} — Powered by Cepha</title>
     <base href="/" />
     <link rel="manifest" href="manifest.json" />
@@ -576,12 +577,13 @@ public class AccountController : Controller
     <link rel="stylesheet" href="css/app.css" />
     <link rel="icon" href="favicon.ico" />
     <link rel="apple-touch-icon" href="icon-192.png" />
+    <script>(()=>{const t=localStorage.getItem('cepha-theme');if(t)document.documentElement.setAttribute('data-theme',t)})()</script>
     <script type="importmap"></script>
     <script type="module">import "./main.js";</script>
 </head>
 <body>
     <div id="app">
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#0f0f23;">
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:var(--cepha-bg,#0f0f23);">
             <div style="font-size:4rem;">🧬</div>
             <h2 style="color:#667eea;">Loading...</h2>
         </div>

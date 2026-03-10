@@ -205,6 +205,11 @@ function renderLoop() {
 function applyFrame(frame) {
     const el = document.querySelector(frame.selector);
     if (!el) return;
+
+    // Suppress transitions during DOM swap to prevent theme flicker
+    const root = document.documentElement;
+    root.classList.add('cepha-no-transition');
+
     switch (frame.op) {
         case 'setInnerHTML':
             el.innerHTML = frame.value;
@@ -231,6 +236,11 @@ function applyFrame(frame) {
             CephaLoader.endNav();
             break;
     }
+
+    // Re-enable transitions after paint (GPU-composited, no flicker)
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => root.classList.remove('cepha-no-transition'));
+    });
 }
 
 // Activate resources from innerHTML (which doesn't run scripts or load stylesheets natively).

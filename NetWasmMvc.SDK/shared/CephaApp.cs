@@ -174,14 +174,11 @@ public class CephaApplication
             return context.ResponseBody ?? "";
         });
 
-        // Wire SignalR handlers
+        // Wire SignalR handlers — expression lambdas
         var signalR = provider.GetRequiredService<ISignalREngine>();
-        JsExports.RegisterHubConnectHandler(async (hubName) =>
-            await signalR.ConnectAsync(hubName));
-        JsExports.RegisterHubDisconnectHandler(async (hubName, connId) =>
-            await signalR.DisconnectAsync(hubName, connId));
-        JsExports.RegisterHubInvokeHandler(async (hubName, method, connId, argsJson) =>
-            await signalR.InvokeAsync(hubName, method, connId, argsJson));
+        JsExports.RegisterHubConnectHandler(hubName => signalR.ConnectAsync(hubName));
+        JsExports.RegisterHubDisconnectHandler((hubName, connId) => signalR.DisconnectAsync(hubName, connId));
+        JsExports.RegisterHubInvokeHandler((hubName, method, connId, argsJson) => signalR.InvokeAsync(hubName, method, connId, argsJson));
 
         // Wire CephaKit server-side request handler
         JsExports.RegisterHandleRequestHandler(async (method, path, headersJson, body) =>
@@ -262,9 +259,7 @@ public class CephaApplication
         // Ensure database tables exist (EF Core)
         await EnsureDatabaseAsync();
 
-        var currentPath = JsInterop.GetCurrentPath();
-        if (string.IsNullOrEmpty(currentPath))
-            currentPath = defaultPath;
+        var currentPath = JsInterop.GetCurrentPath() is { Length: > 0 } p ? p : defaultPath;
 
         await JsExports.Navigate(currentPath);
 
@@ -275,7 +270,8 @@ public class CephaApplication
 
         JsInterop.ConsoleLog($"✅ Cepha ready — {routes} routes, {hubs.Count} hubs ({string.Join(", ", hubs)})");
 
-        await Task.Delay(Timeout.Infinite);
+        // Block forever — WASM event loop (TaskCompletionSource avoids Monitor overhead)
+        await new TaskCompletionSource().Task;
     }
 
     /// <summary>
