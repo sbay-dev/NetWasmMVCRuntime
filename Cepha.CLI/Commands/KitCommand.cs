@@ -257,13 +257,16 @@ internal static class KitCommand
 
     private static string? FindServerScript(string projectDir)
     {
-        // Check wwwroot first (source)
-        var src = Path.Combine(projectDir, "wwwroot", "cepha-server.mjs");
-        if (File.Exists(src)) return src;
-
-        // Check build output
+        // Prefer build output (has _framework as sibling after dotnet build)
         var bin = Path.Combine(projectDir, "bin", "Debug", "net10.0", "wwwroot", "cepha-server.mjs");
         if (File.Exists(bin)) return bin;
+
+        var binRel = Path.Combine(projectDir, "bin", "Release", "net10.0", "wwwroot", "cepha-server.mjs");
+        if (File.Exists(binRel)) return binRel;
+
+        // Fallback to source wwwroot
+        var src = Path.Combine(projectDir, "wwwroot", "cepha-server.mjs");
+        if (File.Exists(src)) return src;
 
         return null;
     }

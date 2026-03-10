@@ -37,11 +37,19 @@ const tlsOptions = findCert();
 const protocol = tlsOptions ? 'https' : 'http';
 
 // ─── Resolve fingerprinted dotnet.js ────────────────────────
-const frameworkDir = join(__dirname, '_framework');
+const frameworkCandidates = [
+    join(__dirname, '_framework'),
+    join(__dirname, '..', 'bin', 'Debug', 'net10.0', 'wwwroot', '_framework'),
+    join(__dirname, '..', 'bin', 'Release', 'net10.0', 'wwwroot', '_framework'),
+    join(__dirname, '..', 'publish', 'wwwroot', '_framework'),
+];
+const frameworkDir = frameworkCandidates.find(d => existsSync(d));
+if (!frameworkDir) { console.error('❌ _framework directory not found. Run "dotnet build" first.'); process.exit(1); }
 const dotnetFile = readdirSync(frameworkDir).find(f => f.startsWith('dotnet.') && f.endsWith('.js') && !f.includes('native') && !f.includes('runtime'));
 if (!dotnetFile) { console.error('❌ dotnet.js not found in _framework/'); process.exit(1); }
 
-const { dotnet } = await import(`./_framework/${dotnetFile}`);
+const dotnetPath = join(frameworkDir, dotnetFile);
+const { dotnet } = await import(`file://${dotnetPath.replace(/\\/g, '/')}`);
 
 // ─── Boot .NET WASM Runtime ─────────────────────────────────
 const { setModuleImports, getAssemblyExports, getConfig, runMainAndExit } = await dotnet
