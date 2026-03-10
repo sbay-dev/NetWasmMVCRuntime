@@ -108,6 +108,25 @@
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- ═══ Cepha Brand Icons (fallback if project doesn't have them) ═══ -->
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\favicon.ico') OR '$([System.IO.FileInfo]::new($(MSBuildProjectDirectory)\wwwroot\favicon.ico).Length)' == '0'">
+    <Content Include="$(_NwmSdkRoot)content\wwwroot\favicon.ico"
+             Link="wwwroot\favicon.ico"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\icon-192.png')">
+    <Content Include="$(_NwmSdkRoot)content\wwwroot\icon-192.png"
+             Link="wwwroot\icon-192.png"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\icon-512.png')">
+    <Content Include="$(_NwmSdkRoot)content\wwwroot\icon-512.png"
+             Link="wwwroot\icon-512.png"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- ═══ Global Usings ═══════════════════════════════════════ -->
   <ItemGroup>
     <Using Include="Cepha" />

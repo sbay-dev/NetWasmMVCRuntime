@@ -26,6 +26,9 @@ internal static class PublishCommand
                 case "azure":
                     target = "azure";
                     break;
+                case "export" or "clean":
+                    target = "export";
+                    break;
                 case "-o" or "--output":
                     if (i + 1 < args.Length) outputDir = args[++i];
                     break;
@@ -37,6 +40,7 @@ internal static class PublishCommand
         {
             var choice = ConsoleUI.Select("Publish target:", [
                 "📁  Local folder (default)",
+                "📦  Export for manual upload (CF Pages / any host)",
                 "☁️   Cloudflare Pages",
                 "⚡  Cloudflare Pages + CephaKit (Edge Worker)",
                 "🔷  Azure Static Web Apps"
@@ -44,9 +48,10 @@ internal static class PublishCommand
 
             target = choice switch
             {
-                1 => "cloudflare",
-                2 => "cloudflare-kit",
-                3 => "azure",
+                1 => "export",
+                2 => "cloudflare",
+                3 => "cloudflare-kit",
+                4 => "azure",
                 _ => "folder"
             };
         }
@@ -64,6 +69,7 @@ internal static class PublishCommand
 
         return target switch
         {
+            "export" => await PublishExport(projectDir, projectName, outputDir),
             "cloudflare" => await PublishCloudflare(projectDir, projectName),
             "cloudflare-kit" => await PublishCloudflareKit(projectDir, projectName),
             "azure" => await PublishAzure(projectDir, projectName),
@@ -102,6 +108,85 @@ internal static class PublishCommand
 
         Console.WriteLine();
         return 0;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Export — clean folder for manual upload
+    // ═══════════════════════════════════════════════════════════
+
+    private static async Task<int> PublishExport(string projectDir, string name, string? outputDir)
+    {
+        var exportDir = outputDir ?? Path.Combine(projectDir, "cepha-deploy");
+        ConsoleUI.WriteInfo($"Exporting '{name}' for manual upload...");
+
+        // ── 1. Build ──
+        var pubDir = Path.Combine(projectDir, "publish");
+        var buildResult = await ConsoleUI.WithSpinner("Building for production...", async () =>
+            await RunProcess("dotnet", $"publish -c Release -o \"{pubDir}\" --nologo", projectDir));
+
+        if (buildResult != 0)
+        {
+            ConsoleUI.WriteError("Build failed.");
+            return 1;
+        }
+
+        var wwwroot = Path.Combine(pubDir, "wwwroot");
+        if (!Directory.Exists(wwwroot))
+        {
+            ConsoleUI.WriteError("No wwwroot output found.");
+            return 1;
+        }
+
+        // ── 2. Clean copy to export directory ──
+        ConsoleUI.WriteStep("Preparing clean export...");
+        if (Directory.Exists(exportDir))
+            Directory.Delete(exportDir, true);
+
+        CopyDirectory(wwwroot, exportDir);
+
+        // ── 3. Add hosting configs ──
+        File.WriteAllText(Path.Combine(exportDir, "_headers"), """
+            /*
+              Cross-Origin-Embedder-Policy: require-corp
+              Cross-Origin-Opener-Policy: same-origin
+              Access-Control-Allow-Origin: *
+
+            /_framework/*.wasm
+              Cache-Control: public, max-age=31536000, immutable
+
+            /_framework/*.js
+              Cache-Control: public, max-age=31536000, immutable
+
+            /_framework/*.dat
+              Cache-Control: public, max-age=31536000, immutable
+            """.Replace("            ", ""));
+
+        // ── 4. Stats ──
+        ShowOutputStats(exportDir);
+
+        ConsoleUI.WriteSuccess("📦 Export ready!");
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"  📂 {exportDir}");
+        Console.ResetColor();
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine();
+        Console.WriteLine("  Upload options:");
+        Console.WriteLine("    • Cloudflare Pages → Dashboard → Upload folder");
+        Console.WriteLine("    • npx wrangler pages deploy \"" + exportDir + "\" --project-name <name>");
+        Console.WriteLine("    • Any static hosting provider (Netlify, Vercel, etc.)");
+        Console.ResetColor();
+        Console.WriteLine();
+        return 0;
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.GetFiles(source))
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)));
+        foreach (var dir in Directory.GetDirectories(source))
+            CopyDirectory(dir, Path.Combine(destination, Path.GetFileName(dir)));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -170,29 +255,24 @@ internal static class PublishCommand
     /// </summary>
     private static void GenerateCloudflareConfig(string wwwroot)
     {
-        // _headers — Cross-Origin isolation for WASM threading + correct MIME types
         var headersPath = Path.Combine(wwwroot, "_headers");
         if (!File.Exists(headersPath))
         {
             File.WriteAllText(headersPath, """
             /*
-              X-Content-Type-Options: nosniff
-              Cross-Origin-Embedder-Policy: credentialless
+              Cross-Origin-Embedder-Policy: require-corp
               Cross-Origin-Opener-Policy: same-origin
+              Access-Control-Allow-Origin: *
 
             /_framework/*.wasm
-              Content-Type: application/wasm
+              Cache-Control: public, max-age=31536000, immutable
+
+            /_framework/*.js
+              Cache-Control: public, max-age=31536000, immutable
 
             /_framework/*.dat
-              Content-Type: application/octet-stream
+              Cache-Control: public, max-age=31536000, immutable
             """.Replace("            ", ""));
-        }
-
-        // _redirects — SPA fallback: all non-file paths serve index.html
-        var redirectsPath = Path.Combine(wwwroot, "_redirects");
-        if (!File.Exists(redirectsPath))
-        {
-            File.WriteAllText(redirectsPath, "/*  /index.html  200\n");
         }
     }
 

@@ -166,7 +166,9 @@ internal static class NewCommand
         WriteFile(cssDir, "app.css", "/* Project-specific styles — add your customizations here */\n");
         WriteEmbeddedFile(cssDir, "cepha.css");
         WriteFile(wwwroot, "index.html", GenerateIndexHtml(name));
-        WriteFile(wwwroot, "favicon.ico", ""); // placeholder
+        WriteBinaryEmbeddedFile(wwwroot, "favicon.ico");
+        WriteBinaryEmbeddedFile(wwwroot, "icon-192.png");
+        WriteBinaryEmbeddedFile(wwwroot, "icon-512.png");
         WriteEmbeddedFile(wwwroot, "main.js");
         WriteEmbeddedFile(wwwroot, "cepha-runtime-worker.js");
         WriteEmbeddedFile(wwwroot, "cepha-data-worker.js");
@@ -209,6 +211,19 @@ internal static class NewCommand
         using var stream = asm.GetManifestResourceStream(resName)!;
         using var reader = new StreamReader(stream);
         File.WriteAllText(Path.Combine(dir, fileName), reader.ReadToEnd());
+    }
+
+    private static void WriteBinaryEmbeddedFile(string dir, string fileName)
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        var suffix = ".Templates." + fileName.Replace('/', '.').Replace('\\', '.');
+        var resName = asm.GetManifestResourceNames()
+            .FirstOrDefault(n => n.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+        if (resName == null)
+            throw new InvalidOperationException($"Embedded resource '{fileName}' not found.");
+        using var stream = asm.GetManifestResourceStream(resName)!;
+        using var fs = File.Create(Path.Combine(dir, fileName));
+        stream.CopyTo(fs);
     }
 
     // ═══ Template Generators ═════════════════════════════════
@@ -560,6 +575,7 @@ public class AccountController : Controller
     <link rel="stylesheet" href="css/cepha.css" />
     <link rel="stylesheet" href="css/app.css" />
     <link rel="icon" href="favicon.ico" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
     <script type="importmap"></script>
     <script type="module">import "./main.js";</script>
 </head>
@@ -586,7 +602,9 @@ public class AccountController : Controller
   "theme_color": "#667eea",
   "orientation": "any",
   "icons": [
-    { "src": "favicon.ico", "sizes": "64x64", "type": "image/x-icon" }
+    { "src": "favicon.ico", "sizes": "32x32 16x16", "type": "image/x-icon" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ],
   "categories": ["productivity"]
 }
@@ -696,7 +714,9 @@ self.addEventListener('fetch', e => {
         WriteFile(cssDir, "app.css", "/* Benchmark styles */\n");
         WriteEmbeddedFile(cssDir, "cepha.css");
         WriteFile(wwwroot, "index.html", GenerateIndexHtml(name));
-        WriteFile(wwwroot, "favicon.ico", "");
+        WriteBinaryEmbeddedFile(wwwroot, "favicon.ico");
+        WriteBinaryEmbeddedFile(wwwroot, "icon-192.png");
+        WriteBinaryEmbeddedFile(wwwroot, "icon-512.png");
         WriteEmbeddedFile(wwwroot, "main.js");
         WriteEmbeddedFile(wwwroot, "cepha-runtime-worker.js");
         WriteEmbeddedFile(wwwroot, "cepha-data-worker.js");
