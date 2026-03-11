@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - 'NetWasmMvc.SDK/**'
+      - '.github/workflows/sdk-build.yml'
   pull_request:
     branches: [main]
     paths:
       - 'NetWasmMvc.SDK/**'
+      - '.github/workflows/sdk-build.yml'
   workflow_dispatch:
     inputs:
       bump_version:
