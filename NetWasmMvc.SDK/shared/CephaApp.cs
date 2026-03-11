@@ -244,7 +244,7 @@ public class CephaApplication
     /// <param name="defaultPath">Default route if URL path is empty (default: "/" — resolved by MvcEngine)</param>
     public async Task RunAsync(string defaultPath = "/")
     {
-        JsInterop.ConsoleLog("🧬 Cepha is starting...");
+        JsInterop.DevLog("🧬 Cepha is starting...");
 
         // Set client fingerprint for session binding
         try { SessionStorageService.SetClientFingerprint(JsInterop.GetFingerprint()); }
@@ -287,11 +287,11 @@ public class CephaApplication
             {
                 var bytes = Convert.FromBase64String(base64);
                 File.WriteAllBytes(dbFileName, bytes);
-                JsInterop.ConsoleLog($"🗄️ Database restored from OPFS ({bytes.Length:N0} bytes)");
+                JsInterop.DevLog($"🗄️ Database restored from OPFS ({bytes.Length:N0} bytes)");
             }
             else
             {
-                JsInterop.ConsoleLog("🗄️ No database snapshot in OPFS — fresh start");
+                JsInterop.DevLog("🗄️ No database snapshot in OPFS — fresh start");
             }
         }
         catch (Exception ex)
@@ -331,7 +331,7 @@ public class CephaApplication
                 var bytes = File.ReadAllBytes(dbFileName);
                 var base64 = Convert.ToBase64String(bytes);
                 await JsInterop.PersistDbToOPFS(base64);
-                JsInterop.ConsoleLog($"🗄️ Database persisted to OPFS ({bytes.Length:N0} bytes)");
+                JsInterop.DevLog($"🗄️ Database persisted to OPFS ({bytes.Length:N0} bytes)");
             }
             else
             {
@@ -355,7 +355,7 @@ public class CephaApplication
             var json = await JsInterop.OpfsRead("cepha_sessions.json");
             if (SessionStorageService.RestoreState(json))
             {
-                JsInterop.ConsoleLog("🔐 Sessions restored from OPFS");
+                JsInterop.DevLog("🔐 Sessions restored from OPFS");
             }
         }
         catch (Exception ex)
@@ -375,7 +375,7 @@ public class CephaApplication
         {
             var json = SessionStorageService.SerializeState();
             await JsInterop.OpfsWrite("cepha_sessions.json", json);
-            JsInterop.ConsoleLog($"🔐 Sessions persisted to OPFS ({json.Length} chars)");
+            JsInterop.DevLog($"🔐 Sessions persisted to OPFS ({json.Length} chars)");
 
             // Broadcast auth change to other tabs via BroadcastChannel
             try { JsInterop.BroadcastAuthChange("sync"); }
@@ -399,7 +399,7 @@ public class CephaApplication
             if (dbContext != null)
             {
                 await dbContext.Database.EnsureCreatedAsync();
-                JsInterop.ConsoleLog("🗄️ Database tables ensured");
+                JsInterop.DevLog("🗄️ Database tables ensured");
             }
         }
         catch (Exception ex)
@@ -469,14 +469,14 @@ public class CephaApplication
 
             triggers.OnSignedIn = async (userId, userName, roles) =>
             {
-                JsInterop.ConsoleLog($"🧬 AtomicProbe: {userName} signed in [{string.Join(",", roles)}]");
+                JsInterop.DevLog($"🧬 AtomicProbe: {userName} signed in [{string.Join(",", roles)}]");
                 // Persist + broadcast immediately — all tabs get the new frame
                 await PersistSessionsIfDirtyAsync();
             };
 
             triggers.OnSignedOut = async (userId, userName) =>
             {
-                JsInterop.ConsoleLog($"🧬 AtomicProbe: {userName} signed out");
+                JsInterop.DevLog($"🧬 AtomicProbe: {userName} signed out");
                 // Persist + broadcast immediately — all tabs re-render as guest
                 await PersistSessionsIfDirtyAsync();
             };
@@ -491,7 +491,7 @@ public class CephaApplication
                 JsInterop.ConsoleWarn($"🧬 AtomicProbe: {userName} locked out until {until:HH:mm}");
             };
 
-            JsInterop.ConsoleLog("🧬 Atomic Probes wired to IdentityTriggers");
+            JsInterop.DevLog("🧬 Atomic Probes wired to IdentityTriggers");
         }
         catch { /* Identity not registered — no probes */ }
     }

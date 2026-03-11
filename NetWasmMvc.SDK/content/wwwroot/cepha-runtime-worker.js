@@ -7,6 +7,7 @@ self.onerror = (msg, src, line, col, err) =>
     console.error('🧬 Worker error:', msg, err);
 self.onunhandledrejection = (e) =>
     console.error('🧬 Worker unhandled rejection:', e.reason);
+const __DEV__ = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1' || self.location.hostname === '[::1]';
 
 import { dotnet } from './_framework/dotnet.js';
 
@@ -39,7 +40,7 @@ const { setModuleImports, getAssemblyExports, getConfig, runMain } = await dotne
     .withApplicationArguments("start")
     .create();
 
-console.log('%c🧬 Cepha: .NET runtime created', 'color: #667eea');
+if (__DEV__) console.log('%c🧬 Cepha: .NET runtime created', 'color: #667eea');
 
 // Register JS functions — DOM ops post back to main thread
 setModuleImports('main.js', {
@@ -128,6 +129,9 @@ setModuleImports('main.js', {
             _pending.set(id, resolve);
             self.postMessage({ type: 'opfs', op: 'read', id, path });
         })
+    },
+    cepha: {
+        isDevMode: () => __DEV__
     }
 });
 

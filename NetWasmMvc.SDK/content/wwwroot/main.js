@@ -4,7 +4,8 @@
 // All intelligence, MVC, EF Core, and SQLite run in the Worker.
 // main.js only renders what it's told — it has ZERO page awareness.
 
-console.log('%c🧬 NetWasmMvc.SDK — Display Surface', 'color: #667eea; font-weight: bold');
+const __DEV__ = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]';
+if (__DEV__) console.log('%c🧬 NetWasmMvc.SDK — Display Surface', 'color: #667eea; font-weight: bold');
 
 // ─── CephaLoader: Native Loading System ──────────────────────
 
@@ -148,12 +149,12 @@ window.CephaClient = {
                 if (res.ok) {
                     this.serverUrl = url;
                     this.connected = true;
-                    console.log(`%c🧬 Cepha server: ${url}`, 'color: #28a745; font-weight: bold');
+                    if (__DEV__) console.log(`%c🧬 Cepha server: ${url}`, 'color: #28a745; font-weight: bold');
                     return await res.json();
                 }
             } catch { /* next */ }
         }
-        console.log('%c🧬 Cepha: offline mode (Worker-only)', 'color: #ffc107');
+        if (__DEV__) console.log('%c🧬 Cepha: offline mode (Worker-only)', 'color: #ffc107');
         return null;
     },
     async fetch(method, path, body) {
@@ -535,7 +536,7 @@ window.CephaData = (() => {
                 if (data.type === 'ready') {
                     ready = true;
                     send('init').then(() =>
-                        console.log('%c🧬 CephaData: OPFS worker ready', 'color: #48bb78; font-weight: bold')
+                        if (__DEV__) console.log('%c🧬 CephaData: OPFS worker ready', 'color: #48bb78; font-weight: bold')
                     );
                     return;
                 }

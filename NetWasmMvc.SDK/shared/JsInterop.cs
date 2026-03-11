@@ -58,6 +58,12 @@ public static partial class JsInterop
     [JSImport("globalThis.console.error")]
     public static partial void ConsoleError(string message);
 
+    [JSImport("cepha.isDevMode", "main.js")]
+    public static partial bool IsDevMode();
+
+    /// <summary>Log to console only in dev mode (localhost).</summary>
+    public static void DevLog(string message) { if (IsDevMode()) ConsoleLog(message); }
+
     // ─── Navigation ───────────────────────────────────────────
 
     [JSImport("navigation.getPath", "main.js")]

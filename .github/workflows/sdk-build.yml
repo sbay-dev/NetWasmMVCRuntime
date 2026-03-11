@@ -1,0 +1,135 @@
+name: 🧬 SDK Build & Pack
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'NetWasmMvc.SDK/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'NetWasmMvc.SDK/**'
+  workflow_dispatch:
+    inputs:
+      bump_version:
+        description: 'Bump SDK version (patch/minor/major/none)'
+        required: false
+        default: 'none'
+        type: choice
+        options: [none, patch, minor, major]
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build SDK
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Verify SDK structure
+        run: |
+          Write-Host "📦 Checking SDK structure..."
+          $required = @(
+            'NetWasmMvc.SDK/Sdk/Sdk.props',
+            'NetWasmMvc.SDK/Sdk/Sdk.targets',
+            'NetWasmMvc.SDK/NetWasmMvc.SDK.csproj',
+            'NetWasmMvc.SDK/content/wwwroot/main.js',
+            'NetWasmMvc.SDK/content/wwwroot/cepha-runtime-worker.js',
+            'NetWasmMvc.SDK/content/_headers'
+          )
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) {
+            Write-Error "❌ Missing files: $($missing -join ', ')"
+            exit 1
+          }
+          Write-Host "✅ All SDK files present"
+
+      - name: Verify __DEV__ guards in JS
+        run: |
+          Write-Host "🔍 Checking production console log guards..."
+          $files = @(
+            'NetWasmMvc.SDK/content/wwwroot/main.js',
+            'NetWasmMvc.SDK/content/wwwroot/cepha-runtime-worker.js'
+          )
+          foreach ($f in $files) {
+            $content = Get-Content $f -Raw
+            if ($content -notmatch '__DEV__') {
+              Write-Error "❌ $f missing __DEV__ guard"
+              exit 1
+            }
+          }
+          Write-Host "✅ Production log guards verified"
+
+      - name: Verify SysLog localhost guard
+        run: |
+          $templates = Get-ChildItem -Recurse -Filter "cepha-syslog.js" | Select-Object -ExpandProperty FullName
+          foreach ($f in $templates) {
+            $content = Get-Content $f -Raw
+            if ($content -match 'discoverServer' -and $content -notmatch '\[::1\]') {
+              Write-Error "❌ $f missing IPv6 localhost guard in discoverServer()"
+              exit 1
+            }
+          }
+          Write-Host "✅ SysLog localhost guards verified"
+
+      - name: Verify _headers template
+        run: |
+          $headers = Get-Content 'NetWasmMvc.SDK/content/_headers' -Raw
+          if ($headers -notmatch 'Cross-Origin-Embedder-Policy') {
+            Write-Error "❌ _headers missing COEP header"
+            exit 1
+          }
+          if ($headers -match 'credentialless') {
+            Write-Error "❌ _headers uses credentialless instead of require-corp"
+            exit 1
+          }
+          Write-Host "✅ _headers template verified"
+
+      - name: Bump version
+        if: github.event.inputs.bump_version != 'none' && github.event.inputs.bump_version != ''
+        run: |
+          $csproj = 'NetWasmMvc.SDK/NetWasmMvc.SDK.csproj'
+          $xml = [xml](Get-Content $csproj)
+          $versionNode = $xml.SelectSingleNode('//Version')
+          $current = [version]$versionNode.InnerText
+          $bump = '${{ github.event.inputs.bump_version }}'
+          switch ($bump) {
+            'patch' { $new = "$($current.Major).$($current.Minor).$($current.Build + 1)" }
+            'minor' { $new = "$($current.Major).$($current.Minor + 1).0" }
+            'major' { $new = "$($current.Major + 1).0.0" }
+          }
+          $versionNode.InnerText = $new
+          $xml.Save($csproj)
+          Write-Host "📦 Version bumped: $current → $new"
+          echo "SDK_VERSION=$new" >> $env:GITHUB_ENV
+
+      - name: Pack SDK
+        run: |
+          dotnet pack NetWasmMvc.SDK/NetWasmMvc.SDK.csproj -c Release --no-restore -o ./artifacts
+          Write-Host "📦 SDK packed"
+          Get-ChildItem ./artifacts/*.nupkg | ForEach-Object { Write-Host "  → $($_.Name) ($([math]::Round($_.Length / 1MB, 2)) MB)" }
+
+      - name: Upload NuGet artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-nupkg
+          path: artifacts/*.nupkg
+          retention-days: 30
+
+      - name: Commit version bump
+        if: github.event.inputs.bump_version != 'none' && github.event.inputs.bump_version != '' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add NetWasmMvc.SDK/NetWasmMvc.SDK.csproj
+          git commit -m "chore: bump SDK version to ${{ env.SDK_VERSION }}"
+          git push
