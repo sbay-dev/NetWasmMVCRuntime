@@ -168,6 +168,32 @@
     <Message Importance="high" Text="🧬 CephaKit starting on $(CephaKitPort) (HTTPS)" />
   </Target>
 
+  <!-- ═══ Publish: Auto-generate hosting config ═══════════════ -->
+  <!-- Copies _headers (Cloudflare Pages / Netlify / static hosts) after publish.
+       Opt-out: set <CephaGenerateHeaders>false</CephaGenerateHeaders> in your .csproj -->
+  <PropertyGroup>
+    <CephaGenerateHeaders Condition="'$(CephaGenerateHeaders)' == ''">true</CephaGenerateHeaders>
+  </PropertyGroup>
+
+  <Target Name="_CephaGeneratePublishHeaders"
+          AfterTargets="Publish"
+          Condition="'$(CephaGenerateHeaders)' == 'true'">
+    <PropertyGroup>
+      <_CephaPublishWwwroot>$(PublishDir)wwwroot</_CephaPublishWwwroot>
+      <_CephaSdkHeaders>$(_NwmSdkRoot)content\_headers</_CephaSdkHeaders>
+    </PropertyGroup>
+
+    <!-- Copy SDK _headers template to publish output (skip if project has custom _headers) -->
+    <Copy SourceFiles="$(_CephaSdkHeaders)"
+          DestinationFolder="$(_CephaPublishWwwroot)"
+          SkipUnchangedFiles="true"
+          Condition="!Exists('$(_CephaPublishWwwroot)\_headers') AND Exists('$(_CephaSdkHeaders)')" />
+
+    <Message Importance="high" Text="🧬 Cepha: Publish output ready at $(_CephaPublishWwwroot)" />
+    <Message Importance="high" Text="🧬 Deploy: npx wrangler pages deploy &quot;$(_CephaPublishWwwroot)&quot;" />
+    <Message Importance="high" Text="🧬 Or serve: dotnet serve -p 5000 -d &quot;$(_CephaPublishWwwroot)&quot;" />
+  </Target>
+
   <!-- ═══ Build Banner ════════════════════════════════════════ -->
   <Target Name="_NwmBuildBanner" BeforeTargets="CoreCompile">
     <Message Importance="high" Text="🧬 NetWasmMvc.SDK v$(NetWasmMvcVersion) — Powered by Cepha (Physarum polycephalum)" />
