@@ -112,6 +112,9 @@ jobs:
           Write-Host "📦 Version bumped: $current → $new"
           echo "SDK_VERSION=$new" >> $env:GITHUB_ENV
 
+      - name: Restore SDK packages
+        run: dotnet restore NetWasmMvc.SDK/NetWasmMvc.SDK.csproj
+
       - name: Pack SDK
         run: |
           dotnet pack NetWasmMvc.SDK/NetWasmMvc.SDK.csproj -c Release --no-restore -o ./artifacts
