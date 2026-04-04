@@ -32,7 +32,17 @@ The **only change** to migrate was replacing the SDK reference in `.csproj`:
 <Project Sdk="NetWasmMvc.SDK/1.0.53">
 ```
 
-Everything else — controllers, views, models, Program.cs — remained untouched.
+Everything else — controllers, views, models, Program.cs, wwwroot — remained untouched.
+
+### How it stays clean
+
+The SDK automatically generates a `wwwroot/.gitignore` on first build, excluding its runtime files (`main.js`, `cepha-runtime-worker.js`, `cepha-data-worker.js`, `index.html`, `cepha-server.mjs`). These files are materialized into `wwwroot/` by the WebAssembly build system for dev-server compatibility, but they are **never committed to version control**.
+
+To revert to standard ASP.NET Core MVC, simply restore the original SDK:
+```xml
+<Project Sdk="Microsoft.NET.Sdk.Web">
+```
+Then delete `wwwroot/.gitignore` and the SDK-generated files. No source code needs changing.
 
 ---
 
@@ -319,17 +329,21 @@ samples/TestRefApp/
 │   ├── _ViewImports.cshtml       # Tag helper imports (UNMODIFIED)
 │   └── _ViewStart.cshtml         # Layout assignment (UNMODIFIED)
 ├── wwwroot/
-│   ├── main.js                   # SDK runtime (auto-synced by build)
-│   ├── cepha-runtime-worker.js   # .NET WASM worker (auto-synced)
-│   ├── cepha-data-worker.js      # OPFS data worker (auto-synced)
-│   ├── index.html                # SPA shell (from SDK)
+│   ├── .gitignore                # Auto-generated: excludes SDK runtime files
 │   ├── css/site.css              # App styles (UNMODIFIED)
 │   ├── js/site.js                # App scripts (UNMODIFIED)
-│   └── lib/                      # Bootstrap, jQuery (UNMODIFIED)
+│   ├── lib/                      # Bootstrap, jQuery (UNMODIFIED)
+│   ├── favicon.ico               # App icon (UNMODIFIED)
+│   │                             # ── SDK files below appear on build but are git-ignored ──
+│   ├── main.js                   # (git-ignored) SDK runtime — auto-injected
+│   ├── cepha-runtime-worker.js   # (git-ignored) .NET WASM worker — auto-injected
+│   ├── cepha-data-worker.js      # (git-ignored) OPFS data worker — auto-injected
+│   ├── index.html                # (git-ignored) SPA shell — auto-injected
+│   └── cepha-server.mjs          # (git-ignored) Node.js host — auto-injected
 ├── Program.cs                    # Standard ASP.NET Core startup (UNMODIFIED)
 ├── TestRefApp.csproj             # Only change: Sdk="NetWasmMvc.SDK/1.0.53"
 ├── nuget.config                  # Points to local NuGet feed
 └── global.json                   # .NET SDK version pin
 ```
 
-**The only modified file is `TestRefApp.csproj`** — changing the SDK attribute.
+**The only tracked change is `TestRefApp.csproj`** — the SDK attribute. All runtime files are auto-injected and git-ignored.

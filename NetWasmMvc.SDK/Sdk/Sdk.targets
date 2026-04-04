@@ -321,19 +321,29 @@
     <Message Importance="high" Text="🧬 NetWasmMvc.SDK v$(NetWasmMvcVersion) — Powered by Cepha (Physarum polycephalum)" />
   </Target>
 
-  <!-- ═══ Sync SDK runtime files to project wwwroot ═══════════ -->
-  <!-- Ensures VS dev server / dotnet run always uses the SDK version
-       of runtime JS files, even when serving from project source dir. -->
-  <Target Name="_CephaSyncRuntimeFiles" BeforeTargets="CoreCompile">
-    <Copy SourceFiles="$(_NwmSdkRoot)content\wwwroot\main.js"
-          DestinationFiles="$(MSBuildProjectDirectory)\wwwroot\main.js"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(_NwmSdkRoot)content\wwwroot\cepha-runtime-worker.js"
-          DestinationFiles="$(MSBuildProjectDirectory)\wwwroot\cepha-runtime-worker.js"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(_NwmSdkRoot)content\wwwroot\cepha-data-worker.js"
-          DestinationFiles="$(MSBuildProjectDirectory)\wwwroot\cepha-data-worker.js"
-          SkipUnchangedFiles="true" />
+  <!-- ═══ Auto-generate wwwroot/.gitignore for SDK runtime files ═ -->
+  <!-- The WebAssembly SDK's StaticWebAssets system materializes Content Link
+       items into the project's source wwwroot during build.  These are SDK-owned
+       runtime files that should NOT be committed to version control.
+       This target creates a .gitignore to exclude them, ensuring the project's
+       git diff shows ONLY the Sdk="NetWasmMvc.SDK" change in .csproj. -->
+  <Target Name="_CephaGenerateWwwrootGitIgnore" BeforeTargets="CoreCompile"
+          Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\.gitignore')">
+    <PropertyGroup>
+      <_CephaGitIgnoreContent># NetWasmMvc.SDK runtime files (auto-generated on build, do not edit)
+# These files are injected by the SDK and should not be committed.
+# To customize index.html, remove its entry below and track your version.
+main.js
+cepha-runtime-worker.js
+cepha-data-worker.js
+index.html
+cepha-server.mjs
+</_CephaGitIgnoreContent>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(MSBuildProjectDirectory)\wwwroot\.gitignore"
+                     Lines="$(_CephaGitIgnoreContent)"
+                     Overwrite="true" />
+    <Message Importance="high" Text="🧬 Cepha: Generated wwwroot/.gitignore (SDK runtime files excluded from git)" />
   </Target>
 
 </Project>
