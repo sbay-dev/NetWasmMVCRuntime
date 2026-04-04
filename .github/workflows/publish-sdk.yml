@@ -92,11 +92,23 @@ jobs:
           ls -la ./artifacts/
           dotnet nuget verify ./artifacts/NetWasmMvc.SDK.${{ steps.version.outputs.VERSION }}.nupkg || true
       
-      - name: 🚀 Push to NuGet
+      - name: 🚀 Push to NuGet.org
+        if: ${{ secrets.NUGET_API_KEY != '' }}
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           dotnet nuget push ./artifacts/NetWasmMvc.SDK.${{ steps.version.outputs.VERSION }}.nupkg \
-            --api-key ${{ secrets.NUGET_API_KEY }} \
-            --source ${{ env.NUGET_SOURCE }} \
+            --api-key "$NUGET_API_KEY" \
+            --source "${{ env.NUGET_SOURCE }}" \
+            --skip-duplicate
+
+      - name: 🚀 Push to GitHub Packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dotnet nuget push ./artifacts/NetWasmMvc.SDK.${{ steps.version.outputs.VERSION }}.nupkg \
+            --api-key "$GITHUB_TOKEN" \
+            --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
             --skip-duplicate
 
       - name: 🔏 Generate Build Attestation
