@@ -1,8 +1,0 @@
-# NetWasmMvc.SDK runtime files (auto-generated on build, do not edit)
-# These files are injected by the SDK and should not be committed.
-# To customize index.html, remove its entry below and track your version.
-main.js
-cepha-runtime-worker.js
-cepha-data-worker.js
-index.html
-cepha-server.mjs

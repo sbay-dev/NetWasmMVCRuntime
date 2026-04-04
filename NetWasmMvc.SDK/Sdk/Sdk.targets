@@ -108,6 +108,7 @@
   <!-- ═══ SDK Root Path ═══════════════════════════════════════ -->
   <PropertyGroup>
     <_NwmSdkRoot>$(MSBuildThisFileDirectory)..\</_NwmSdkRoot>
+    <_CephaContentRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\content\wwwroot\'))</_CephaContentRoot>
   </PropertyGroup>
 
   <!-- ═══ ASP.NET Core targeting pack (compile-time types) ════ -->
@@ -190,53 +191,27 @@
        so Service Workers and new Worker() references work correctly.
        Integrity hashes are still provided via importmap. -->
 
-  <!-- ═══ SDK runtime files (always use SDK version for consistency) ═══ -->
+  <!-- ═══ SDK runtime files — zero-touch injection ═══════════ -->
+  <!-- SDK runtime files are registered as StaticWebAssets served directly
+       from the NuGet package cache. They NEVER appear in the project's
+       source wwwroot — zero modifications to the consumer project.
+       The dev server reads them from the SDK cache path, and the build
+       pipeline copies them to the output wwwroot automatically. -->
   <ItemGroup>
-    <!-- Remove consumer copies so SDK's version takes precedence -->
+    <!-- Suppress any physical copies the user might have -->
     <Content Remove="wwwroot\main.js" />
     <Content Remove="wwwroot\cepha-runtime-worker.js" />
     <Content Remove="wwwroot\cepha-data-worker.js" />
-    <Content Include="$(_NwmSdkRoot)content\wwwroot\main.js"
-             Link="wwwroot\main.js"
-             CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="$(_NwmSdkRoot)content\wwwroot\cepha-runtime-worker.js"
-             Link="wwwroot\cepha-runtime-worker.js"
-             CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="$(_NwmSdkRoot)content\wwwroot\cepha-data-worker.js"
-             Link="wwwroot\cepha-data-worker.js"
-             CopyToOutputDirectory="PreserveNewest" />
+    <Content Remove="wwwroot\index.html" Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\index.html')" />
   </ItemGroup>
 
   <!-- ═══ Default wwwroot content (if consumer doesn't have them) ═ -->
-  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\cepha-server.mjs')">
-    <Content Include="$(_NwmSdkRoot)content\wwwroot\cepha-server.mjs"
-             Link="wwwroot\cepha-server.mjs"
-             CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\index.html')">
-    <Content Include="$(_NwmSdkRoot)content\wwwroot\index.html"
-             Link="wwwroot\index.html"
-             CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <!-- ═══ Cepha Brand Icons (fallback if project doesn't have them) ═══ -->
-  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\favicon.ico')">
-    <Content Include="$(_NwmSdkRoot)content\wwwroot\favicon.ico"
-             Link="wwwroot\favicon.ico"
-             CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\icon-192.png')">
-    <Content Include="$(_NwmSdkRoot)content\wwwroot\icon-192.png"
-             Link="wwwroot\icon-192.png"
-             CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\icon-512.png')">
-    <Content Include="$(_NwmSdkRoot)content\wwwroot\icon-512.png"
-             Link="wwwroot\icon-512.png"
-             CopyToOutputDirectory="PreserveNewest" />
+  <!-- These are also injected as StaticWebAssets — no source copies needed -->
+  <ItemGroup>
+    <Content Remove="wwwroot\cepha-server.mjs" Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\cepha-server.mjs')" />
+    <Content Remove="wwwroot\favicon.ico" Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\favicon.ico')" />
+    <Content Remove="wwwroot\icon-192.png" Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\icon-192.png')" />
+    <Content Remove="wwwroot\icon-512.png" Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\icon-512.png')" />
   </ItemGroup>
 
   <!-- ═══ Global Usings ═══════════════════════════════════════ -->
@@ -321,29 +296,185 @@
     <Message Importance="high" Text="🧬 NetWasmMvc.SDK v$(NetWasmMvcVersion) — Powered by Cepha (Physarum polycephalum)" />
   </Target>
 
-  <!-- ═══ Auto-generate wwwroot/.gitignore for SDK runtime files ═ -->
-  <!-- The WebAssembly SDK's StaticWebAssets system materializes Content Link
-       items into the project's source wwwroot during build.  These are SDK-owned
-       runtime files that should NOT be committed to version control.
-       This target creates a .gitignore to exclude them, ensuring the project's
-       git diff shows ONLY the Sdk="NetWasmMvc.SDK" change in .csproj. -->
-  <Target Name="_CephaGenerateWwwrootGitIgnore" BeforeTargets="CoreCompile"
-          Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\.gitignore')">
-    <PropertyGroup>
-      <_CephaGitIgnoreContent># NetWasmMvc.SDK runtime files (auto-generated on build, do not edit)
-# These files are injected by the SDK and should not be committed.
-# To customize index.html, remove its entry below and track your version.
-main.js
-cepha-runtime-worker.js
-cepha-data-worker.js
-index.html
-cepha-server.mjs
-</_CephaGitIgnoreContent>
-    </PropertyGroup>
-    <WriteLinesToFile File="$(MSBuildProjectDirectory)\wwwroot\.gitignore"
-                     Lines="$(_CephaGitIgnoreContent)"
-                     Overwrite="true" />
-    <Message Importance="high" Text="🧬 Cepha: Generated wwwroot/.gitignore (SDK runtime files excluded from git)" />
+  <!-- ═══ Register SDK assets into StaticWebAssets pipeline ═══ -->
+  <!-- Injects SDK runtime files as StaticWebAssets with ContentRoot pointing
+       to the NuGet package cache — NOT the project's source wwwroot.
+       This is the same mechanism Blazor uses for blazor.webassembly.js.
+       Files are served by the dev server from the cache, and copied to
+       the build/publish output by the StaticWebAssets copy targets. -->
+  <Target Name="_CephaRegisterRuntimeAssets"
+          BeforeTargets="ResolveCoreStaticWebAssets"
+          AfterTargets="ResolveStaticWebAssetsConfiguration">
+    <ItemGroup>
+      <!-- ── Core runtime (always injected) ── -->
+      <StaticWebAsset Include="$(_CephaContentRoot)main.js">
+        <SourceType>Package</SourceType>
+        <SourceId>NetWasmMvc.SDK</SourceId>
+        <ContentRoot>$(_CephaContentRoot)</ContentRoot>
+        <BasePath>/</BasePath>
+        <RelativePath>main.js</RelativePath>
+        <OriginalItemSpec>$(_CephaContentRoot)main.js</OriginalItemSpec>
+        <AssetKind>All</AssetKind>
+        <AssetMode>All</AssetMode>
+        <AssetRole>Primary</AssetRole>
+        <AssetMergeSource></AssetMergeSource>
+        <AssetMergeBehavior>PreferTarget</AssetMergeBehavior>
+        <RelatedAsset></RelatedAsset>
+        <AssetTraitName></AssetTraitName>
+        <AssetTraitValue></AssetTraitValue>
+        <Fingerprint></Fingerprint>
+        <Integrity></Integrity>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </StaticWebAsset>
+      <StaticWebAsset Include="$(_CephaContentRoot)cepha-runtime-worker.js">
+        <SourceType>Package</SourceType>
+        <SourceId>NetWasmMvc.SDK</SourceId>
+        <ContentRoot>$(_CephaContentRoot)</ContentRoot>
+        <BasePath>/</BasePath>
+        <RelativePath>cepha-runtime-worker.js</RelativePath>
+        <OriginalItemSpec>$(_CephaContentRoot)cepha-runtime-worker.js</OriginalItemSpec>
+        <AssetKind>All</AssetKind>
+        <AssetMode>All</AssetMode>
+        <AssetRole>Primary</AssetRole>
+        <AssetMergeSource></AssetMergeSource>
+        <AssetMergeBehavior>PreferTarget</AssetMergeBehavior>
+        <RelatedAsset></RelatedAsset>
+        <AssetTraitName></AssetTraitName>
+        <AssetTraitValue></AssetTraitValue>
+        <Fingerprint></Fingerprint>
+        <Integrity></Integrity>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </StaticWebAsset>
+      <StaticWebAsset Include="$(_CephaContentRoot)cepha-data-worker.js">
+        <SourceType>Package</SourceType>
+        <SourceId>NetWasmMvc.SDK</SourceId>
+        <ContentRoot>$(_CephaContentRoot)</ContentRoot>
+        <BasePath>/</BasePath>
+        <RelativePath>cepha-data-worker.js</RelativePath>
+        <OriginalItemSpec>$(_CephaContentRoot)cepha-data-worker.js</OriginalItemSpec>
+        <AssetKind>All</AssetKind>
+        <AssetMode>All</AssetMode>
+        <AssetRole>Primary</AssetRole>
+        <AssetMergeSource></AssetMergeSource>
+        <AssetMergeBehavior>PreferTarget</AssetMergeBehavior>
+        <RelatedAsset></RelatedAsset>
+        <AssetTraitName></AssetTraitName>
+        <AssetTraitValue></AssetTraitValue>
+        <Fingerprint></Fingerprint>
+        <Integrity></Integrity>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </StaticWebAsset>
+
+      <!-- ── Conditional defaults (only if user doesn't have their own) ── -->
+      <StaticWebAsset Include="$(_CephaContentRoot)index.html"
+                      Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\index.html')">
+        <SourceType>Package</SourceType>
+        <SourceId>NetWasmMvc.SDK</SourceId>
+        <ContentRoot>$(_CephaContentRoot)</ContentRoot>
+        <BasePath>/</BasePath>
+        <RelativePath>index.html</RelativePath>
+        <OriginalItemSpec>$(_CephaContentRoot)index.html</OriginalItemSpec>
+        <AssetKind>All</AssetKind>
+        <AssetMode>All</AssetMode>
+        <AssetRole>Primary</AssetRole>
+        <AssetMergeSource></AssetMergeSource>
+        <AssetMergeBehavior>PreferTarget</AssetMergeBehavior>
+        <RelatedAsset></RelatedAsset>
+        <AssetTraitName></AssetTraitName>
+        <AssetTraitValue></AssetTraitValue>
+        <Fingerprint></Fingerprint>
+        <Integrity></Integrity>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </StaticWebAsset>
+      <StaticWebAsset Include="$(_CephaContentRoot)cepha-server.mjs"
+                      Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\cepha-server.mjs')">
+        <SourceType>Package</SourceType>
+        <SourceId>NetWasmMvc.SDK</SourceId>
+        <ContentRoot>$(_CephaContentRoot)</ContentRoot>
+        <BasePath>/</BasePath>
+        <RelativePath>cepha-server.mjs</RelativePath>
+        <OriginalItemSpec>$(_CephaContentRoot)cepha-server.mjs</OriginalItemSpec>
+        <AssetKind>All</AssetKind>
+        <AssetMode>All</AssetMode>
+        <AssetRole>Primary</AssetRole>
+        <AssetMergeSource></AssetMergeSource>
+        <AssetMergeBehavior>PreferTarget</AssetMergeBehavior>
+        <RelatedAsset></RelatedAsset>
+        <AssetTraitName></AssetTraitName>
+        <AssetTraitValue></AssetTraitValue>
+        <Fingerprint></Fingerprint>
+        <Integrity></Integrity>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </StaticWebAsset>
+      <StaticWebAsset Include="$(_CephaContentRoot)favicon.ico"
+                      Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\favicon.ico')">
+        <SourceType>Package</SourceType>
+        <SourceId>NetWasmMvc.SDK</SourceId>
+        <ContentRoot>$(_CephaContentRoot)</ContentRoot>
+        <BasePath>/</BasePath>
+        <RelativePath>favicon.ico</RelativePath>
+        <OriginalItemSpec>$(_CephaContentRoot)favicon.ico</OriginalItemSpec>
+        <AssetKind>All</AssetKind>
+        <AssetMode>All</AssetMode>
+        <AssetRole>Primary</AssetRole>
+        <AssetMergeSource></AssetMergeSource>
+        <AssetMergeBehavior>PreferTarget</AssetMergeBehavior>
+        <RelatedAsset></RelatedAsset>
+        <AssetTraitName></AssetTraitName>
+        <AssetTraitValue></AssetTraitValue>
+        <Fingerprint></Fingerprint>
+        <Integrity></Integrity>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </StaticWebAsset>
+      <StaticWebAsset Include="$(_CephaContentRoot)icon-192.png"
+                      Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\icon-192.png')">
+        <SourceType>Package</SourceType>
+        <SourceId>NetWasmMvc.SDK</SourceId>
+        <ContentRoot>$(_CephaContentRoot)</ContentRoot>
+        <BasePath>/</BasePath>
+        <RelativePath>icon-192.png</RelativePath>
+        <OriginalItemSpec>$(_CephaContentRoot)icon-192.png</OriginalItemSpec>
+        <AssetKind>All</AssetKind>
+        <AssetMode>All</AssetMode>
+        <AssetRole>Primary</AssetRole>
+        <AssetMergeSource></AssetMergeSource>
+        <AssetMergeBehavior>PreferTarget</AssetMergeBehavior>
+        <RelatedAsset></RelatedAsset>
+        <AssetTraitName></AssetTraitName>
+        <AssetTraitValue></AssetTraitValue>
+        <Fingerprint></Fingerprint>
+        <Integrity></Integrity>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </StaticWebAsset>
+      <StaticWebAsset Include="$(_CephaContentRoot)icon-512.png"
+                      Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\icon-512.png')">
+        <SourceType>Package</SourceType>
+        <SourceId>NetWasmMvc.SDK</SourceId>
+        <ContentRoot>$(_CephaContentRoot)</ContentRoot>
+        <BasePath>/</BasePath>
+        <RelativePath>icon-512.png</RelativePath>
+        <OriginalItemSpec>$(_CephaContentRoot)icon-512.png</OriginalItemSpec>
+        <AssetKind>All</AssetKind>
+        <AssetMode>All</AssetMode>
+        <AssetRole>Primary</AssetRole>
+        <AssetMergeSource></AssetMergeSource>
+        <AssetMergeBehavior>PreferTarget</AssetMergeBehavior>
+        <RelatedAsset></RelatedAsset>
+        <AssetTraitName></AssetTraitName>
+        <AssetTraitValue></AssetTraitValue>
+        <Fingerprint></Fingerprint>
+        <Integrity></Integrity>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </StaticWebAsset>
+    </ItemGroup>
   </Target>
 
 </Project>
