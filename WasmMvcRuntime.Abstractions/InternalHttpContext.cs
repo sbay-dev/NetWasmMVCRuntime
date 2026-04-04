@@ -11,6 +11,8 @@ public class InternalHttpContext : IInternalHttpContext
     public string ContentType { get; set; } = "text/plain";
     public string ResponseBody { get; set; } = string.Empty;
     public IDictionary<string, string> FormData { get; } = new Dictionary<string, string>();
+    public string? RequestBody { get; set; }
+    public IDictionary<string, string> RouteValues { get; } = new Dictionary<string, string>();
     public IServiceProvider? RequestServices { get; set; }
 
     /// <summary>Per-request items (like ASP.NET HttpContext.Items). Merged into ViewData before rendering.</summary>

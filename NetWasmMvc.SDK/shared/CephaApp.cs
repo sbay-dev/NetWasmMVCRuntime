@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using WasmMvcRuntime.Abstractions;
@@ -40,6 +41,11 @@ public static class CephaApp
 
         // User's custom services
         configureServices?.Invoke(services);
+
+        // Register ILogger<> open generic fallback so any service/controller
+        // that depends on ILogger<T> resolves to a no-op browser logger
+        services.AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>),
+                              typeof(Microsoft.Extensions.Logging.NullLogger<>));
 
         var provider = services.BuildServiceProvider();
         return new CephaApplication(provider);
@@ -188,10 +194,11 @@ public class CephaApplication
             {
                 Path = path,
                 Method = method,
+                RequestBody = body,
                 RequestServices = scope.ServiceProvider
             };
 
-            // Parse form data from body (for POST requests via CephaKit)
+            // Parse form data from body (for POST requests)
             if (method == "POST" && !string.IsNullOrEmpty(body))
             {
                 try
@@ -201,11 +208,18 @@ public class CephaApplication
                         foreach (var kvp in formDict)
                             context.FormData[kvp.Key] = kvp.Value;
                 }
-                catch { }
+                catch { /* body is not form-encoded JSON — will be handled by [FromBody] */ }
             }
 
             await mvcEngine.ProcessRequestAsync(context);
+
+            // Post-process HTML responses: resolve ASP.NET conventions
             var contentType = context.ContentType ?? "text/html";
+            if (contentType.Contains("html") && !string.IsNullOrEmpty(context.ResponseBody))
+            {
+                context.ResponseBody = PostProcessHtml(context.ResponseBody);
+            }
+
             var statusCode = context.StatusCode != 0 ? context.StatusCode
                 : string.IsNullOrEmpty(context.ResponseBody) ? 404 : 200;
             return System.Text.Json.JsonSerializer.Serialize(new
@@ -250,18 +264,27 @@ public class CephaApplication
         try { SessionStorageService.SetClientFingerprint(JsInterop.GetFingerprint()); }
         catch { /* Worker may not have fingerprint */ }
 
-        // Restore database from OPFS Worker (persistent storage)
-        await RestoreDatabaseAsync();
-
-        // Restore session state from OPFS (HMAC key + active sessions)
-        await RestoreSessionsFromOpfsAsync();
-
-        // Ensure database tables exist (EF Core)
-        await EnsureDatabaseAsync();
+        // Never let startup storage stages block first render indefinitely.
+        await RunStartupStageAsync("restore-db", () => RestoreDatabaseAsync(), TimeSpan.FromSeconds(2));
+        await RunStartupStageAsync("restore-sessions", () => RestoreSessionsFromOpfsAsync(), TimeSpan.FromSeconds(2));
+        await RunStartupStageAsync("ensure-db", () => EnsureDatabaseAsync(), TimeSpan.FromSeconds(3));
 
         var currentPath = JsInterop.GetCurrentPath() is { Length: > 0 } p ? p : defaultPath;
 
-        await JsExports.Navigate(currentPath);
+        var rendered = await RunStartupStageAsync(
+            $"navigate:{currentPath}",
+            () => JsExports.Navigate(currentPath),
+            TimeSpan.FromSeconds(8));
+
+        if (!rendered)
+        {
+            JsInterop.SetInnerHTML(
+                "#app",
+                "<div style='padding:24px;font-family:system-ui'>" +
+                "<h3 style='margin:0 0 8px;color:#b91c1c'>Startup timeout</h3>" +
+                "<p style='margin:0;color:#374151'>Cepha runtime started but initial route rendering did not complete.</p>" +
+                "</div>");
+        }
 
         var mvcEngine = _provider.GetRequiredService<IMvcEngine>() as MvcEngine;
         var signalR = _provider.GetRequiredService<ISignalREngine>();
@@ -272,6 +295,26 @@ public class CephaApplication
 
         // Block forever — WASM event loop (TaskCompletionSource avoids Monitor overhead)
         await new TaskCompletionSource().Task;
+    }
+
+    private static async Task<bool> RunStartupStageAsync(string stage, Func<Task> action, TimeSpan timeout)
+    {
+        try
+        {
+            await action().WaitAsync(timeout);
+            JsInterop.DevLog($"🧬 Startup stage completed: {stage}");
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            JsInterop.ConsoleWarn($"🧬 Startup stage timed out: {stage}");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            JsInterop.ConsoleWarn($"🧬 Startup stage failed ({stage}): {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>
@@ -494,5 +537,45 @@ public class CephaApplication
             JsInterop.DevLog("🧬 Atomic Probes wired to IdentityTriggers");
         }
         catch { /* Identity not registered — no probes */ }
+    }
+
+    /// <summary>
+    /// Post-processes rendered HTML to resolve ASP.NET Core conventions that don't
+    /// exist in browser-wasm: tilde-slash (~/) paths and asp-* tag helper attributes.
+    /// </summary>
+    private static string PostProcessHtml(string html)
+    {
+        // 1. Resolve ~/  →  /  in href, src, action attributes
+        html = Regex.Replace(html, @"(href|src|action)\s*=\s*""~/", @"$1=""/");
+        html = Regex.Replace(html, @"(href|src|action)\s*=\s*'~/", @"$1='/");
+
+        // 2. Emulate asp-controller / asp-action tag helpers on <a> elements
+        html = Regex.Replace(html, @"<a\b([^>]*?)>", m =>
+        {
+            var attrs = m.Groups[1].Value;
+            if (!attrs.Contains("asp-controller")) return m.Value;
+
+            var ctrl = Regex.Match(attrs, @"asp-controller\s*=\s*""([^""]*)""").Groups[1].Value;
+            var action = Regex.Match(attrs, @"asp-action\s*=\s*""([^""]*)""").Groups[1].Value;
+            var area = Regex.Match(attrs, @"asp-area\s*=\s*""([^""]*)""").Groups[1].Value;
+
+            if (string.IsNullOrEmpty(ctrl)) return m.Value;
+
+            var href = string.IsNullOrEmpty(area)
+                ? $"/{ctrl}" + (string.IsNullOrEmpty(action) || action == "Index" ? "" : $"/{action}")
+                : $"/{area}/{ctrl}" + (string.IsNullOrEmpty(action) || action == "Index" ? "" : $"/{action}");
+
+            // Strip asp-* attributes, add href
+            attrs = Regex.Replace(attrs, @"\s*asp-\w+\s*=\s*""[^""]*""", "");
+            return $@"<a href=""{href}""{attrs}>";
+        });
+
+        // 3. Strip asp-append-version attributes (no-op in WASM)
+        html = Regex.Replace(html, @"\s*asp-append-version\s*=\s*""[^""]*""", "");
+
+        // 4. Strip empty <script type="importmap"></script> (causes console noise)
+        html = Regex.Replace(html, @"<script\s+type=""importmap""\s*>\s*</script>", "");
+
+        return html;
     }
 }

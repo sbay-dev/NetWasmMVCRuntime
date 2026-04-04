@@ -1,0 +1,16 @@
+﻿<Project Sdk="NetWasmMvc.SDK/1.0.53">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>ee54272f-f5d0-4668-a5d6-fe3a868bd1dc</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NetContainer.Ref" Version="2.6.2" />
+  </ItemGroup>
+
+
+
+</Project>

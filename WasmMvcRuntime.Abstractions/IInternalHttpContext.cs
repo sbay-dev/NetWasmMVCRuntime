@@ -36,6 +36,16 @@ public interface IInternalHttpContext
     IDictionary<string, string> FormData { get; }
 
     /// <summary>
+    /// Gets or sets the raw request body (JSON for API calls)
+    /// </summary>
+    string? RequestBody { get; set; }
+
+    /// <summary>
+    /// Route parameter values extracted from URL path
+    /// </summary>
+    IDictionary<string, string> RouteValues { get; }
+
+    /// <summary>
     /// Gets or sets the scoped service provider for this request
     /// </summary>
     IServiceProvider? RequestServices { get; set; }

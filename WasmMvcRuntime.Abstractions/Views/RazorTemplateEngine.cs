@@ -78,6 +78,9 @@ public class RazorTemplateEngine : IRazorTemplateEngine
             // Process AnchorTagHelper: <a asp-controller="X" asp-action="Y"> → <a href="/x/y">
             html = ProcessAnchorTagHelpers(html);
 
+            // Resolve ~/ paths
+            html = ResolveTildePaths(html);
+
             return await Task.FromResult(html);
         }
         catch (Exception ex)
@@ -136,6 +139,9 @@ public class RazorTemplateEngine : IRazorTemplateEngine
         // Process AnchorTagHelper in layout
         html = ProcessAnchorTagHelpers(html);
 
+        // Resolve ~/ paths (ASP.NET Core tilde notation → app-root-relative)
+        html = ResolveTildePaths(html);
+
         // Process simple expressions
         html = ReplaceSimpleExpressions(html);
 
@@ -189,23 +195,77 @@ public class RazorTemplateEngine : IRazorTemplateEngine
     }
 
     /// <summary>
-    /// Extracts @section Name { ... } blocks from the template
+    /// Extracts @section Name { ... } blocks from the template.
+    /// Uses a brace-counting parser instead of regex to handle arbitrary nesting
+    /// depth (JavaScript code can have deeply nested braces: function → try → ${template}).
     /// </summary>
     private Dictionary<string, string> ExtractSections(ref string html)
     {
         var sections = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var sb = new System.Text.StringBuilder(html.Length);
+        int pos = 0;
 
-        // Match @section Name { content } with balanced braces
-        html = Regex.Replace(html, @"@section\s+(\w+)\s*\{((?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*)\}",
-            match =>
+        while (pos < html.Length)
+        {
+            // Look for @section
+            var idx = html.IndexOf("@section", pos, StringComparison.Ordinal);
+            if (idx < 0)
             {
-                var name = match.Groups[1].Value;
-                var content = match.Groups[2].Value.Trim();
-                sections[name] = content;
-                return "";
-            }, RegexOptions.Singleline);
+                sb.Append(html, pos, html.Length - pos);
+                break;
+            }
 
+            // Append everything before @section
+            sb.Append(html, pos, idx - pos);
+            pos = idx + "@section".Length;
+
+            // Skip whitespace to get section name
+            while (pos < html.Length && char.IsWhiteSpace(html[pos])) pos++;
+
+            // Read section name (word characters)
+            int nameStart = pos;
+            while (pos < html.Length && (char.IsLetterOrDigit(html[pos]) || html[pos] == '_')) pos++;
+            if (pos == nameStart) { sb.Append("@section"); continue; }
+            var sectionName = html.Substring(nameStart, pos - nameStart);
+
+            // Skip whitespace to opening brace
+            while (pos < html.Length && char.IsWhiteSpace(html[pos])) pos++;
+            if (pos >= html.Length || html[pos] != '{') { sb.Append("@section ").Append(sectionName); continue; }
+
+            // Count braces to find matching close
+            int depth = 0;
+            int contentStart = pos + 1;
+            for (; pos < html.Length; pos++)
+            {
+                if (html[pos] == '{') depth++;
+                else if (html[pos] == '}') { depth--; if (depth == 0) break; }
+            }
+
+            if (depth == 0 && pos < html.Length)
+            {
+                var content = html.Substring(contentStart, pos - contentStart).Trim();
+                sections[sectionName] = content;
+                pos++; // skip closing brace
+            }
+            else
+            {
+                // Unbalanced braces — emit as-is
+                sb.Append("@section ").Append(sectionName).Append(html, contentStart - 1, html.Length - contentStart + 1);
+                pos = html.Length;
+            }
+        }
+
+        html = sb.ToString();
         return sections;
+    }
+
+    /// <summary>
+    /// Resolves ASP.NET Core ~/ path prefix to app-root-relative paths.
+    /// In WASM SPA mode, ~/ simply becomes / (app root is always /).
+    /// </summary>
+    private static string ResolveTildePaths(string html)
+    {
+        return Regex.Replace(html, @"(href|src|action)\s*=\s*""~/", @"$1=""/");
     }
 
     /// <summary>

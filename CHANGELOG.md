@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.53] — 2026-04-04
+
+### Added
+- **TestRefApp sample** (`samples/TestRefApp/`) — full ASP.NET Core MVC app running in browser via WASM with zero source-code changes
+- **MVC type shims** (`shared/MvcShims.cs`) — Controller, ControllerBase, JsonResult, HTTP method attributes, HttpContext
+- **Hosting shims** (`shared/HostingShims.cs`) — IHostedService, BackgroundService, ILogger<T>, NullLogger<T>
+- **WebApplication shims** (`shared/WebApplicationShims.cs`) — WebApplicationBuilder, WebApplication, CephaServiceCollection with working `AddHostedService<T>()`
+- **NetContainer.Ref shims** (`shared/NetContainerShims.cs`) — BrowserRefOrchestratorService, BrowserGuestContext, and all domain service stubs
+- **Static assets shims** (`shared/StaticAssetsShims.cs`) — MapStaticAssets, MapControllerRoute, WithStaticAssets no-ops
+- **Environment shims** (`shared/EnvironmentShims.cs`) — IWebHostEnvironment stub
+- **EventSource interception** in `main.js` — stubs SSE connections for API paths silently
+- **Service worker opt-in** — registration only when `window.__cephaServiceWorker = true`
+- **Migration documentation** (`docs/TestRefApp-Migration-Guide.md`)
+
+### Fixed
+- **JSON camelCase serialization** — added `CephaJsonDefaults.Options` with `PropertyNamingPolicy.CamelCase` matching ASP.NET Core defaults; applied to `JsonResult`, `OkObjectResult`, `NotFoundObjectResult`, `ObjectResult`, and `MvcEngine` fallback
+- **`@section` extraction** — replaced 2-level regex with character-by-character brace counter supporting unlimited nesting depth
+- **`~/` path resolution** — triple-layer defense: RazorTemplateEngine, CephaApp.PostProcessHtml, main.js activateScripts
+- **Inline script scoping** — `let/const` → `var` replacement in activateScripts() to keep functions global for onclick handlers while avoiding redeclaration errors
+- **AddHostedService<T>** — was a no-op; now registers in DI and starts after CephaApp.Create()
+- **ILogger<T> missing** — registered as open generic NullLogger<> in CephaApp.Create()
+- **Startup hang** — added timeouts for OPFS/session restore stages (2-3s) and initial navigate (8s)
+- **DevLog JSImport crash** — replaced cepha.isDevMode dependency with direct hostname check
+
+### Changed
+- SDK banner now shows dynamic version from NuGet package folder
+- ASP.NET Core runtime assemblies bundled for browser-wasm target
+
 ## [1.0.6] — 2026-02-20
 
 ### Fixed

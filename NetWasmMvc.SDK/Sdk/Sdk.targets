@@ -8,15 +8,122 @@
   <!-- ─── Import base WebAssembly SDK targets ─── -->
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk.WebAssembly" />
 
+  <!-- ═══ Strip AspNetCore runtime pack for WASM ═════════════ -->
+  <!-- NuGet packages may declare a FrameworkReference to Microsoft.AspNetCore.App.
+       The targeting pack (compile) is needed, but no runtime pack exists for browser-wasm.
+       1. Clear UnavailableRuntimePack to suppress NETSDK1082.
+       2. Remove from ResolvedFrameworkReference so Mono SDK doesn't require RuntimePackPath. -->
+  <Target Name="_CephaFixAspNetCoreForWasm"
+          AfterTargets="ProcessFrameworkReferences"
+          Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <ItemGroup>
+      <UnavailableRuntimePack Remove="@(UnavailableRuntimePack)" Condition="'%(Identity)' == 'Microsoft.AspNetCore.App'" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_CephaStripAspNetCoreRuntimeRef"
+          BeforeTargets="_MonoReadAvailableComponentsManifest;_GenerateRuntimeConfigurationFilesInputCache"
+          AfterTargets="ResolveFrameworkReferences"
+          Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <ItemGroup>
+      <ResolvedFrameworkReference Remove="@(ResolvedFrameworkReference)" Condition="'%(Identity)' == 'Microsoft.AspNetCore.App'" />
+    </ItemGroup>
+  </Target>
+
+  <!-- ═══ Include ASP.NET Core shared-framework assemblies in WASM bundle ═══ -->
+  <!-- The targeting pack provides compile-time types but no browser-wasm runtime pack exists.
+       BUILD: inject into @(ReferenceCopyLocalPaths) for _ResolveWasmOutputs / _GatherWasmFilesToBuild.
+       PUBLISH: inject into @(ResolvedFileToPublish) BEFORE _GatherWasmFilesToPublish.
+       The nested publish is a separate MSBuild invocation, so we also hook into
+       WasmNestedPublishAppDependsOn to ensure our target runs in the nested build. -->
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <WasmNestedPublishAppDependsOn>_CephaInjectAspNetForPublish;$(WasmNestedPublishAppDependsOn)</WasmNestedPublishAppDependsOn>
+  </PropertyGroup>
+
+  <!-- Resolve the shared-framework directory once, early in the pipeline -->
+  <Target Name="_CephaResolveAspNetCoreSharedDir"
+          BeforeTargets="_CephaIncludeAspNetCoreAssemblies;_CephaInjectAspNetForPublish"
+          Condition="'$(RuntimeIdentifier)' == 'browser-wasm' AND '$(_CephaAspNetCoreSharedDir)' == ''">
+    <ItemGroup>
+      <_CephaAspNetCoreVersionDirs Include="$([System.IO.Directory]::GetDirectories('$(NetCoreRoot)shared\Microsoft.AspNetCore.App', '$(_TargetFrameworkVersionWithoutV).*'))"
+                                    Condition="Exists('$(NetCoreRoot)shared\Microsoft.AspNetCore.App')" />
+    </ItemGroup>
+    <CreateProperty Value="%(_CephaAspNetCoreVersionDirs.Identity)">
+      <Output TaskParameter="Value" PropertyName="_CephaAspNetCoreSharedDir" />
+    </CreateProperty>
+    <Warning Text="🧬 Cepha: ASP.NET Core shared framework not found under $(NetCoreRoot)shared\Microsoft.AspNetCore.App\ for TFM $(_TargetFrameworkVersionWithoutV)"
+             Condition="'$(_CephaAspNetCoreSharedDir)' == '' OR !Exists('$(_CephaAspNetCoreSharedDir)')" />
+  </Target>
+
+  <!-- BUILD: add to ReferenceCopyLocalPaths so WebCIL conversion picks them up -->
+  <Target Name="_CephaIncludeAspNetCoreAssemblies"
+          AfterTargets="ResolveReferences"
+          BeforeTargets="_ResolveWasmOutputs"
+          Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <ItemGroup Condition="Exists('$(_CephaAspNetCoreSharedDir)')">
+      <ReferenceCopyLocalPaths Include="$(_CephaAspNetCoreSharedDir)\*.dll" />
+    </ItemGroup>
+    <Message Importance="high" Text="🧬 Cepha: Bundling ASP.NET Core runtime for WASM from $(_CephaAspNetCoreSharedDir)"
+             Condition="Exists('$(_CephaAspNetCoreSharedDir)')" />
+  </Target>
+
+  <!-- PUBLISH: inject shared-framework DLLs into ResolvedFileToPublish so
+       _GatherWasmFilesToPublish naturally picks them up into WasmAssembliesToBundle.
+       Runs both in the outer publish (BeforeTargets) and in the nested publish
+       (via WasmNestedPublishAppDependsOn). -->
+  <Target Name="_CephaInjectAspNetForPublish"
+          BeforeTargets="_GatherWasmFilesToPublish"
+          Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <!-- Resolve shared dir if not yet done (nested publish is a fresh MSBuild invocation) -->
+    <ItemGroup Condition="'$(_CephaAspNetCoreSharedDir)' == ''">
+      <_CephaAspNetCoreVersionDirs2 Include="$([System.IO.Directory]::GetDirectories('$(NetCoreRoot)shared\Microsoft.AspNetCore.App', '$(_TargetFrameworkVersionWithoutV).*'))"
+                                     Condition="Exists('$(NetCoreRoot)shared\Microsoft.AspNetCore.App')" />
+    </ItemGroup>
+    <CreateProperty Value="%(_CephaAspNetCoreVersionDirs2.Identity)" Condition="'$(_CephaAspNetCoreSharedDir)' == ''">
+      <Output TaskParameter="Value" PropertyName="_CephaAspNetCoreSharedDir" />
+    </CreateProperty>
+    <!-- Step 1: Remove existing framework ref assemblies (metadata-only) -->
+    <ItemGroup Condition="Exists('$(_CephaAspNetCoreSharedDir)')">
+      <_CephaAspNetRefToRemove Include="@(ResolvedFileToPublish)"
+                                Condition="$([System.String]::new('%(FileName)').StartsWith('Microsoft.AspNetCore.'))" />
+      <ResolvedFileToPublish Remove="@(_CephaAspNetRefToRemove)" />
+    </ItemGroup>
+    <!-- Step 2: Gather DLLs into a private list (avoids batching interference) -->
+    <ItemGroup Condition="Exists('$(_CephaAspNetCoreSharedDir)')">
+      <_CephaAspNetCoreDlls Include="$(_CephaAspNetCoreSharedDir)\*.dll" />
+    </ItemGroup>
+    <!-- Step 3: Add each DLL with correct per-item metadata -->
+    <ItemGroup Condition="Exists('$(_CephaAspNetCoreSharedDir)')">
+      <ResolvedFileToPublish Include="@(_CephaAspNetCoreDlls)"
+                              RelativePath="_framework/%(_CephaAspNetCoreDlls.FileName)%(_CephaAspNetCoreDlls.Extension)"
+                              DestinationSubPath="%(_CephaAspNetCoreDlls.FileName)%(_CephaAspNetCoreDlls.Extension)"
+                              AssetTraitName="WasmResource"
+                              AssetTraitValue="runtime" />
+    </ItemGroup>
+    <Message Importance="high" Text="🧬 Cepha: Injecting ASP.NET Core assemblies into publish (nested=$(_WasmInNestedPublish_UniqueProperty_XYZ)) from $(_CephaAspNetCoreSharedDir)"
+             Condition="Exists('$(_CephaAspNetCoreSharedDir)')" />
+  </Target>
+
   <!-- ═══ SDK Root Path ═══════════════════════════════════════ -->
   <PropertyGroup>
     <_NwmSdkRoot>$(MSBuildThisFileDirectory)..\</_NwmSdkRoot>
   </PropertyGroup>
 
+  <!-- ═══ ASP.NET Core targeting pack (compile-time types) ════ -->
+  <!-- Transitive FrameworkReference from NuGet packages may not resolve in custom SDK.
+       Explicitly add it so WebApplication, Controller, etc. are available at compile time. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
   <!-- ═══ Auto Package References ═════════════════════════════ -->
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite"     Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging"             Version="10.0.3" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design"     Version="10.0.3">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; analyzers; buildtransitive</IncludeAssets>
@@ -45,10 +152,16 @@
     <Compile Include="$(_NwmSdkRoot)shared\JsInterop.cs"            Link="Cepha\JsInterop.cs"            Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\JsExports.cs"            Link="Cepha\JsExports.cs"            Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\CephaApp.cs"             Link="Cepha\CephaApp.cs"             Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\EnvironmentShims.cs"     Link="Cepha\EnvironmentShims.cs"     Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\SqliteNativeResolver.cs" Link="Cepha\SqliteNativeResolver.cs" Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\StaticAssetsShims.cs"    Link="Cepha\StaticAssetsShims.cs"    Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\WebApplicationShims.cs"  Link="Cepha\WebApplicationShims.cs"  Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\NetContainerShims.cs"    Link="Cepha\NetContainerShims.cs"    Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\HostingShims.cs"        Link="Cepha\HostingShims.cs"        Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\MvcShims.cs"          Link="Cepha\MvcShims.cs"          Visible="false" />
   </ItemGroup>
 
-  <!-- ═══ SQLite Native for WASM ══════════════════════════════ -->
+  <!-- ═══ SQLite Native for WASM══════════════════════════════ -->
   <!-- Resolve SQLitePCLRaw version dynamically to avoid hardcoded path mismatches -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
     <NativeFileReference
@@ -77,13 +190,24 @@
        so Service Workers and new Worker() references work correctly.
        Integrity hashes are still provided via importmap. -->
 
-  <!-- ═══ Default wwwroot content (if consumer doesn't have them) ═ -->
-  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\main.js')">
+  <!-- ═══ SDK runtime files (always use SDK version for consistency) ═══ -->
+  <ItemGroup>
+    <!-- Remove consumer copies so SDK's version takes precedence -->
+    <Content Remove="wwwroot\main.js" />
+    <Content Remove="wwwroot\cepha-runtime-worker.js" />
+    <Content Remove="wwwroot\cepha-data-worker.js" />
     <Content Include="$(_NwmSdkRoot)content\wwwroot\main.js"
              Link="wwwroot\main.js"
              CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(_NwmSdkRoot)content\wwwroot\cepha-runtime-worker.js"
+             Link="wwwroot\cepha-runtime-worker.js"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(_NwmSdkRoot)content\wwwroot\cepha-data-worker.js"
+             Link="wwwroot\cepha-data-worker.js"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- ═══ Default wwwroot content (if consumer doesn't have them) ═ -->
   <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\cepha-server.mjs')">
     <Content Include="$(_NwmSdkRoot)content\wwwroot\cepha-server.mjs"
              Link="wwwroot\cepha-server.mjs"
@@ -96,20 +220,8 @@
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\cepha-data-worker.js')">
-    <Content Include="$(_NwmSdkRoot)content\wwwroot\cepha-data-worker.js"
-             Link="wwwroot\cepha-data-worker.js"
-             CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\cepha-runtime-worker.js')">
-    <Content Include="$(_NwmSdkRoot)content\wwwroot\cepha-runtime-worker.js"
-             Link="wwwroot\cepha-runtime-worker.js"
-             CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
   <!-- ═══ Cepha Brand Icons (fallback if project doesn't have them) ═══ -->
-  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\favicon.ico') OR '$([System.IO.FileInfo]::new($(MSBuildProjectDirectory)\wwwroot\favicon.ico).Length)' == '0'">
+  <ItemGroup Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\favicon.ico')">
     <Content Include="$(_NwmSdkRoot)content\wwwroot\favicon.ico"
              Link="wwwroot\favicon.ico"
              CopyToOutputDirectory="PreserveNewest" />
@@ -130,10 +242,20 @@
   <!-- ═══ Global Usings ═══════════════════════════════════════ -->
   <ItemGroup>
     <Using Include="Cepha" />
-    <Using Include="WasmMvcRuntime.Abstractions" />
     <Using Include="WasmMvcRuntime.Core" />
     <Using Include="Microsoft.EntityFrameworkCore" />
     <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+    <Using Include="Microsoft.Extensions.Logging" />
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="System.Net.Http.Json" />
+    <!-- ASP.NET Core implicit usings (mirrors Microsoft.NET.Sdk.Web) -->
+    <Using Include="Microsoft.AspNetCore.Builder" />
+    <Using Include="Microsoft.AspNetCore.Hosting" />
+    <Using Include="Microsoft.AspNetCore.Http" />
+    <Using Include="Microsoft.AspNetCore.Routing" />
+    <!-- Remove auto-imported WasmMvcRuntime.Abstractions to avoid ambiguity with Microsoft.AspNetCore.Mvc -->
+    <Using Remove="WasmMvcRuntime.Abstractions" />
   </ItemGroup>
 
   <!-- ═══ CephaKit Server Auto-Start (dev mode) ════════════ -->
@@ -197,6 +319,21 @@
   <!-- ═══ Build Banner ════════════════════════════════════════ -->
   <Target Name="_NwmBuildBanner" BeforeTargets="CoreCompile">
     <Message Importance="high" Text="🧬 NetWasmMvc.SDK v$(NetWasmMvcVersion) — Powered by Cepha (Physarum polycephalum)" />
+  </Target>
+
+  <!-- ═══ Sync SDK runtime files to project wwwroot ═══════════ -->
+  <!-- Ensures VS dev server / dotnet run always uses the SDK version
+       of runtime JS files, even when serving from project source dir. -->
+  <Target Name="_CephaSyncRuntimeFiles" BeforeTargets="CoreCompile">
+    <Copy SourceFiles="$(_NwmSdkRoot)content\wwwroot\main.js"
+          DestinationFiles="$(MSBuildProjectDirectory)\wwwroot\main.js"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_NwmSdkRoot)content\wwwroot\cepha-runtime-worker.js"
+          DestinationFiles="$(MSBuildProjectDirectory)\wwwroot\cepha-runtime-worker.js"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_NwmSdkRoot)content\wwwroot\cepha-data-worker.js"
+          DestinationFiles="$(MSBuildProjectDirectory)\wwwroot\cepha-data-worker.js"
+          SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

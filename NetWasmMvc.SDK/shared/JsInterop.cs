@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.Versioning;
 
@@ -58,8 +59,32 @@ public static partial class JsInterop
     [JSImport("globalThis.console.error")]
     public static partial void ConsoleError(string message);
 
-    [JSImport("cepha.isDevMode", "main.js")]
-    public static partial bool IsDevMode();
+    /// <summary>
+    /// Determine dev-mode safely. JSImport on globalThis.location.hostname
+    /// may fail in Worker contexts (it's a property, not a callable function).
+    /// Falls back to false (no dev logging) if the call cannot be completed.
+    /// </summary>
+    private static bool? _devMode;
+
+    public static bool IsDevMode()
+    {
+        if (_devMode.HasValue) return _devMode.Value;
+        try
+        {
+            var host = GetHostName();
+            _devMode = string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(host, "[::1]", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            _devMode = false;
+        }
+        return _devMode.Value;
+    }
+
+    [JSImport("globalThis.location.hostname")]
+    private static partial string GetHostName();
 
     /// <summary>Log to console only in dev mode (localhost).</summary>
     public static void DevLog(string message) { if (IsDevMode()) ConsoleLog(message); }

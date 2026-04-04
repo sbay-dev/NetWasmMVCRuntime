@@ -16,9 +16,12 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PublishTrimmed>false</PublishTrimmed>
     <OverrideHtmlAssetPlaceholders Condition="'$(OverrideHtmlAssetPlaceholders)' == ''">true</OverrideHtmlAssetPlaceholders>
-    <NetWasmMvcVersion Condition="'$(NetWasmMvcVersion)' == ''">1.0.6</NetWasmMvcVersion>
+    <!-- Read version dynamically from the NuGet package directory name -->
+    <NetWasmMvcVersion Condition="'$(NetWasmMvcVersion)' == ''">$([System.IO.Path]::GetFileName($([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))))</NetWasmMvcVersion>
     <!-- Disable Razor compilation — .cshtml are embedded resources, not compiled views -->
     <EnableDefaultRazorGenerateItems>false</EnableDefaultRazorGenerateItems>
+    <!-- Suppress CS0436 (type shadowing) — SDK shims intentionally shadow ASP.NET Core types -->
+    <NoWarn>$(NoWarn);CS0436</NoWarn>
   </PropertyGroup>
 
 </Project>

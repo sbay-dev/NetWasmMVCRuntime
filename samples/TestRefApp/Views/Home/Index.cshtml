@@ -1,0 +1,297 @@
+@{ ViewData["Title"] = "NetContainer.Ref Demo"; }
+
+<style>
+    :root { --bg: #0c0c0c; --fg: #33ff33; --muted: #666; --accent: #00b4d8; --danger: #ff5555; --warn: #ffaa00; }
+    .term { background: var(--bg); color: var(--fg); font-family: 'Cascadia Code','Fira Code',monospace; font-size: 13px; padding: 12px; white-space: pre-wrap; line-height: 1.5; }
+    .guest-card { background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 12px 16px; cursor: pointer; transition: all .2s; }
+    .guest-card:hover, .guest-card.active { border-color: var(--accent); box-shadow: 0 0 12px rgba(0,180,216,.25); }
+    .guest-card.frozen { border-color: var(--warn); }
+    .snap-card { background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 10px 14px; }
+    .cmd-input { background: #111; border: 1px solid #444; color: var(--fg); font-family: monospace; }
+    .cmd-input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 4px rgba(0,180,216,.3); }
+    .btn-action { font-size: 13px; padding: 4px 12px; }
+    #toast-area { position: fixed; top: 16px; right: 16px; z-index: 9999; }
+    .toast-msg { padding: 8px 16px; border-radius: 6px; margin-bottom: 6px; color: #fff; font-size: 13px; animation: fadeIn .3s; }
+    .toast-ok { background: #198754; } .toast-err { background: var(--danger); } .toast-info { background: var(--accent); }
+    @@keyframes fadeIn { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
+</style>
+
+<div id="toast-area"></div>
+
+<div class="container-fluid px-4 py-3">
+    <div class="d-flex align-items-center mb-3">
+        <h4 class="mb-0 me-3">🐧 NetContainer.Ref — Interactive Console</h4>
+        <span id="status-badge" class="badge bg-warning">Booting…</span>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshAll()">🔄 Refresh</button>
+    </div>
+
+    <div class="row g-3">
+        <!-- Left: Guests + Snapshots -->
+        <div class="col-md-4">
+            <h6 class="text-light">🖥 Running Guests</h6>
+            <div id="guests-list" class="mb-3"><div class="text-muted small">Loading…</div></div>
+
+            <div class="d-flex align-items-center mb-2">
+                <h6 class="text-light mb-0">📦 Snapshots</h6>
+                <button class="btn btn-sm btn-outline-info ms-auto btn-action" onclick="refreshSnapshots()">↻</button>
+            </div>
+            <div id="snapshots-list"><div class="text-muted small">No snapshots yet</div></div>
+        </div>
+
+        <!-- Right: Terminal + Controls -->
+        <div class="col-md-8">
+            <!-- Action buttons -->
+            <div id="actions" class="d-flex gap-2 mb-2 flex-wrap">
+                <button class="btn btn-sm btn-outline-info btn-action" onclick="doFreeze()" id="btn-freeze">❄ Freeze</button>
+                <button class="btn btn-sm btn-outline-success btn-action" onclick="doResume()" id="btn-resume">▶ Resume</button>
+                <button class="btn btn-sm btn-outline-warning btn-action" onclick="doSnapshot()" id="btn-snapshot">📸 Snapshot</button>
+            </div>
+
+            <!-- Serial console -->
+            <div class="card border-0 shadow mb-3">
+                <div class="card-header bg-dark text-success d-flex align-items-center py-1">
+                    <span>💻 Serial Console</span>
+                    <small id="serial-status" class="text-muted ms-2">—</small>
+                    <button class="btn btn-sm btn-outline-danger ms-auto btn-action" onclick="clearConsole()">🗑</button>
+                </div>
+                <div id="console-output" class="term" style="height: 40vh; overflow-y: auto;">
+                    <span class="text-muted">Waiting for guest…</span>
+                </div>
+                <div class="input-group">
+                    <span class="input-group-text bg-dark text-success border-secondary" style="font-family:monospace;">root@@OpenWrt:~#</span>
+                    <input type="text" id="cmd-input" class="form-control cmd-input" placeholder="Type command and press Enter…"
+                           onkeydown="if(event.key==='Enter')sendCmd()" disabled />
+                    <button class="btn btn-outline-success" onclick="sendCmd()" id="btn-send" disabled>⏎</button>
+                </div>
+            </div>
+
+            <!-- Boot logs (collapsible) -->
+            <details>
+                <summary class="text-muted small mb-1">📺 Boot Logs <span id="line-count">(0)</span></summary>
+                <div id="log-terminal" class="term" style="height: 30vh; overflow-y: auto; font-size: 12px;"></div>
+            </details>
+        </div>
+    </div>
+
+    <div class="mt-2 text-muted small">
+        Powered by <strong>NetContainer.Ref 2.6.2</strong> — freeze → export → restore lifecycle
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    let selectedGuest = null;
+    let evtSource = null;
+    let lineCount = 0;
+    let cmdHistory = [];
+    let histIdx = -1;
+
+    // Strip ANSI escape codes
+    function stripAnsi(s) { return s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1B\].*?\x07/g, ''); }
+
+    // ── Toast notifications
+    function toast(msg, type = 'info') {
+        const d = document.createElement('div');
+        d.className = `toast-msg toast-${type}`;
+        d.textContent = msg;
+        document.getElementById('toast-area').appendChild(d);
+        setTimeout(() => d.remove(), 4000);
+    }
+
+    // ── API helpers
+    async function api(url, method = 'GET', body = null) {
+        const opts = { method, headers: {} };
+        if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+        const r = await fetch(url, opts);
+        if (!r.ok) { const e = await r.text(); throw new Error(e); }
+        return r.json();
+    }
+
+    // ── Refresh guests
+    async function refreshGuests() {
+        try {
+            const guests = await api('/api/guests');
+            const el = document.getElementById('guests-list');
+
+            if (guests.length === 0) {
+                el.innerHTML = '<div class="text-muted small">No guests running</div>';
+                document.getElementById('status-badge').textContent = 'No guests';
+                document.getElementById('status-badge').className = 'badge bg-secondary';
+                return;
+            }
+
+            el.innerHTML = guests.map(g => `
+                <div class="guest-card mb-2 ${g.id === selectedGuest ? 'active' : ''}" onclick="selectGuest('${g.id}')">
+                    <div class="d-flex justify-content-between">
+                        <strong class="text-light" style="font-size:13px;">${g.id.substring(0, 24)}…</strong>
+                        <span class="badge ${g.isRunning ? 'bg-success' : 'bg-warning'}">${g.isRunning ? 'running' : 'frozen'}</span>
+                    </div>
+                    <div class="text-muted" style="font-size:11px;">
+                        PID:${g.qemuPid} | SSH::${g.sshPort} | HTTP::${g.httpPort} | ${g.arch}
+                    </div>
+                </div>
+            `).join('');
+
+            if (!selectedGuest && guests.length > 0) selectGuest(guests[0].id);
+            document.getElementById('status-badge').textContent = `${guests.length} guest(s)`;
+            document.getElementById('status-badge').className = 'badge bg-success';
+        } catch (e) { console.error(e); }
+    }
+
+    // ── Refresh snapshots
+    async function refreshSnapshots() {
+        try {
+            const snaps = await api('/api/snapshots');
+            const el = document.getElementById('snapshots-list');
+
+            if (!snaps || snaps.length === 0) {
+                el.innerHTML = '<div class="text-muted small">No snapshots</div>';
+                return;
+            }
+
+            el.innerHTML = snaps.map(s => `
+                <div class="snap-card mb-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="text-light" style="font-size:12px;">${s.id}</div>
+                            <div class="text-muted" style="font-size:11px;">${s.arch} · ${s.memoryMb}MB · ${new Date(s.createdAt).toLocaleTimeString()}</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline-success btn-action" onclick="doRestore('${s.id}')">🔄 Restore</button>
+                    </div>
+                </div>
+            `).join('');
+        } catch (e) { console.error(e); }
+    }
+
+    // ── Select guest
+    function selectGuest(id) {
+        selectedGuest = id;
+        document.querySelectorAll('.guest-card').forEach(c => c.classList.toggle('active', c.onclick.toString().includes(id)));
+        document.getElementById('cmd-input').disabled = false;
+        document.getElementById('btn-send').disabled = false;
+        document.getElementById('serial-status').textContent = id.substring(0, 20) + '…';
+        connectLogs();
+    }
+
+    // ── SSE log stream
+    function connectLogs() {
+        if (!selectedGuest) return;
+        if (evtSource) evtSource.close();
+        const term = document.getElementById('log-terminal');
+        term.innerHTML = '';
+        lineCount = 0;
+
+        evtSource = new EventSource(`/api/guests/${selectedGuest}/logs/stream`);
+        evtSource.onmessage = (e) => {
+            const line = JSON.parse(e.data);
+            const span = document.createElement('span');
+            if (line.includes('error') || line.includes('ERROR')) span.style.color = '#ff5555';
+            else if (line.includes('warn') || line.includes('WARN')) span.style.color = '#ffaa00';
+            else if (line.includes('procd:') || line.includes('init:')) span.style.color = '#55ffff';
+            span.textContent = line + '\n';
+            term.appendChild(span);
+            lineCount++;
+            document.getElementById('line-count').textContent = `(${lineCount})`;
+            term.scrollTop = term.scrollHeight;
+        };
+        evtSource.onerror = () => { evtSource.close(); evtSource = null; setTimeout(connectLogs, 3000); };
+    }
+
+    // ── Send serial command
+    async function sendCmd() {
+        const input = document.getElementById('cmd-input');
+        const cmd = input.value.trim();
+        if (!cmd || !selectedGuest) return;
+
+        cmdHistory.unshift(cmd);
+        histIdx = -1;
+        input.value = '';
+
+        const out = document.getElementById('console-output');
+        const prompt = document.createElement('span');
+        prompt.style.color = '#00b4d8';
+        prompt.textContent = `root@@OpenWrt:~# ${cmd}\n`;
+        out.appendChild(prompt);
+        out.scrollTop = out.scrollHeight;
+
+        try {
+            const r = await api(`/api/guests/${selectedGuest}/exec`, 'POST', { command: cmd, waitMs: 3000 });
+            const resp = document.createElement('span');
+            resp.textContent = stripAnsi(r.output) + '\n';
+            out.appendChild(resp);
+        } catch (e) {
+            const err = document.createElement('span');
+            err.style.color = '#ff5555';
+            err.textContent = `Error: ${e.message}\n`;
+            out.appendChild(err);
+        }
+        out.scrollTop = out.scrollHeight;
+    }
+
+    // ── Command history navigation
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('cmd-input').addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp' && cmdHistory.length > 0) {
+                histIdx = Math.min(histIdx + 1, cmdHistory.length - 1);
+                e.target.value = cmdHistory[histIdx];
+                e.preventDefault();
+            } else if (e.key === 'ArrowDown') {
+                histIdx = Math.max(histIdx - 1, -1);
+                e.target.value = histIdx >= 0 ? cmdHistory[histIdx] : '';
+                e.preventDefault();
+            }
+        });
+    });
+
+    // ── Actions
+    async function doFreeze() {
+        if (!selectedGuest) return;
+        try {
+            await api(`/api/guests/${selectedGuest}/freeze`, 'POST');
+            toast('❄ Guest frozen', 'ok');
+            refreshGuests();
+        } catch (e) { toast(`Freeze failed: ${e.message}`, 'err'); }
+    }
+
+    async function doResume() {
+        if (!selectedGuest) return;
+        try {
+            await api(`/api/guests/${selectedGuest}/resume`, 'POST');
+            toast('▶ Guest resumed', 'ok');
+            refreshGuests();
+        } catch (e) { toast(`Resume failed: ${e.message}`, 'err'); }
+    }
+
+    async function doSnapshot() {
+        if (!selectedGuest) return;
+        toast('📸 Exporting snapshot…', 'info');
+        try {
+            const r = await api(`/api/guests/${selectedGuest}/snapshot`, 'POST');
+            if (r.success) {
+                toast(`✅ Snapshot saved: ${r.info?.id}`, 'ok');
+                refreshSnapshots();
+            } else {
+                toast(`❌ Snapshot failed: ${r.error}`, 'err');
+            }
+        } catch (e) { toast(`Snapshot error: ${e.message}`, 'err'); }
+    }
+
+    async function doRestore(snapId) {
+        toast('🔄 Restoring from snapshot…', 'info');
+        try {
+            const r = await api(`/api/snapshots/${snapId}/restore`, 'POST');
+            toast(`✅ Restored as ${r.guestId} — HTTP::${r.httpPort}`, 'ok');
+            setTimeout(() => { refreshGuests(); refreshSnapshots(); }, 2000);
+        } catch (e) { toast(`Restore error: ${e.message}`, 'err'); }
+    }
+
+    function clearConsole() { document.getElementById('console-output').innerHTML = ''; }
+
+    function refreshAll() { refreshGuests(); refreshSnapshots(); }
+
+    // ── Init
+    refreshAll();
+    setInterval(refreshGuests, 5000);
+</script>
+}
+

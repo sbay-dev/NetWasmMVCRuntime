@@ -1,0 +1,5 @@
+{
+  "msbuild-sdks": {
+    "NetWasmMvc.SDK": "1.0.53"
+  }
+}

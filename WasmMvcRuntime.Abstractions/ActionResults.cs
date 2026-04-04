@@ -2,6 +2,16 @@
 
 namespace WasmMvcRuntime.Abstractions;
 
+/// <summary>Shared JSON serialization options matching ASP.NET Core defaults (camelCase).</summary>
+public static class CephaJsonDefaults
+{
+    public static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = true
+    };
+}
+
 /// <summary>
 /// Represents an action result that returns a JSON-formatted response
 /// </summary>
@@ -19,7 +29,7 @@ public class JsonResult : IActionResult
         context.StatusCode = 200;
         context.ContentType = "application/json";
         context.ResponseBody = Value != null 
-            ? JsonSerializer.Serialize(Value, new JsonSerializerOptions { WriteIndented = true })
+            ? JsonSerializer.Serialize(Value, CephaJsonDefaults.Options)
             : "null";
         return Task.CompletedTask;
     }
@@ -42,7 +52,7 @@ public class OkObjectResult : IActionResult
         context.StatusCode = 200;
         context.ContentType = "application/json";
         context.ResponseBody = Value != null 
-            ? JsonSerializer.Serialize(Value, new JsonSerializerOptions { WriteIndented = true })
+            ? JsonSerializer.Serialize(Value, CephaJsonDefaults.Options)
             : "null";
         return Task.CompletedTask;
     }
@@ -117,7 +127,7 @@ public class NotFoundObjectResult : IActionResult
         context.StatusCode = 404;
         context.ContentType = "application/json";
         context.ResponseBody = Value != null
-            ? JsonSerializer.Serialize(Value, new JsonSerializerOptions { WriteIndented = true })
+            ? JsonSerializer.Serialize(Value, CephaJsonDefaults.Options)
             : "Not Found";
         return Task.CompletedTask;
     }

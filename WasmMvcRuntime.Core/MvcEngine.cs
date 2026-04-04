@@ -69,6 +69,13 @@ public class MvcEngine : IMvcEngine
             var methodRoutes = method.GetCustomAttributes<RouteAttribute>()
                 .OrderBy(r => r.Order).ToArray();
 
+            // Check for Http* attribute templates (HttpGet, HttpPost, etc.)
+            var httpTemplates = method.GetCustomAttributes()
+                .OfType<IRouteTemplateProvider>()
+                .Where(p => p is not RouteAttribute && !string.IsNullOrEmpty(p.Template))
+                .Select(p => p.Template!)
+                .ToArray();
+
             if (methodRoutes.Length > 0)
             {
                 // Method-level [Route] attributes define absolute routes
@@ -79,6 +86,19 @@ public class MvcEngine : IMvcEngine
                         .Replace("[controller]", controllerName, StringComparison.OrdinalIgnoreCase)
                         .Replace("[action]", method.Name, StringComparison.OrdinalIgnoreCase);
                     var route = NormalizeRoute(template);
+                    RegisterRoute(route, controllerType, method, isApiController, areaPrefix);
+                }
+            }
+            else if (httpTemplates.Length > 0)
+            {
+                // Http* attribute templates (e.g., [HttpGet("api/guests")])
+                foreach (var template in httpTemplates)
+                {
+                    var expanded = template
+                        .Replace("[area]", areaPrefix ?? "", StringComparison.OrdinalIgnoreCase)
+                        .Replace("[controller]", controllerName, StringComparison.OrdinalIgnoreCase)
+                        .Replace("[action]", method.Name, StringComparison.OrdinalIgnoreCase);
+                    var route = NormalizeRoute(expanded);
                     RegisterRoute(route, controllerType, method, isApiController, areaPrefix);
                 }
             }
@@ -157,7 +177,7 @@ public class MvcEngine : IMvcEngine
             if (string.IsNullOrEmpty(path)) path = "/";
 
             // ─── Smart Route Resolution (cascading fallback) ─────
-            var descriptor = ResolveRoute(path);
+            var (descriptor, routeValues) = ResolveRouteWithParams(path);
 
             if (descriptor == null)
             {
@@ -202,8 +222,45 @@ public class MvcEngine : IMvcEngine
                 controllerBase.Form = context.FormData;
             }
 
-            // Invoke action method
-            var result = descriptor.ActionMethod.Invoke(controller, null);
+            // Invoke action method with route parameters and body binding
+            var methodParams = descriptor.ActionMethod.GetParameters();
+            object?[]? args = null;
+            if (methodParams.Length > 0)
+            {
+                args = new object?[methodParams.Length];
+                for (int i = 0; i < methodParams.Length; i++)
+                {
+                    var p = methodParams[i];
+                    if (p.ParameterType == typeof(CancellationToken))
+                    {
+                        args[i] = CancellationToken.None;
+                    }
+                    else if (p.GetCustomAttributes().Any(a => a.GetType().Name == "FromBodyAttribute")
+                             && !string.IsNullOrEmpty(context.RequestBody))
+                    {
+                        try
+                        {
+                            args[i] = System.Text.Json.JsonSerializer.Deserialize(
+                                context.RequestBody, p.ParameterType,
+                                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        }
+                        catch { args[i] = p.HasDefaultValue ? p.DefaultValue : null; }
+                    }
+                    else if (routeValues.TryGetValue(p.Name?.ToLowerInvariant() ?? "", out var rv))
+                    {
+                        args[i] = Convert.ChangeType(rv, p.ParameterType);
+                    }
+                    else if (context.FormData.TryGetValue(p.Name ?? "", out var fv))
+                    {
+                        args[i] = Convert.ChangeType(fv, p.ParameterType);
+                    }
+                    else
+                    {
+                        args[i] = p.HasDefaultValue ? p.DefaultValue : null;
+                    }
+                }
+            }
+            var result = descriptor.ActionMethod.Invoke(controller, args);
             
             // Handle async methods
             if (result is Task task)
@@ -252,7 +309,7 @@ public class MvcEngine : IMvcEngine
                 context.StatusCode = 200;
                 context.ContentType = "application/json";
                 context.ResponseBody = System.Text.Json.JsonSerializer.Serialize(result, 
-                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                    WasmMvcRuntime.Abstractions.CephaJsonDefaults.Options);
             }
             else
             {
@@ -302,53 +359,78 @@ public class MvcEngine : IMvcEngine
     /// <summary>
     /// Smart route resolution with cascading fallback:
     /// 1. Exact match (e.g., /benchmark/stress)
-    /// 2. Append /index (e.g., /benchmark → /benchmark/index)
-    /// 3. Convention: /{controller}/{action} mapping
-    /// 4. Root "/" → /home/index → first controller's first action
+    /// 2. Parameterized match (e.g., /api/guests/{id}/freeze)
+    /// 3. Append /index (e.g., /benchmark → /benchmark/index)
+    /// 4. Convention: /{controller}/{action} mapping
+    /// 5. Root "/" → /home/index → first controller's first action
     /// </summary>
-    private ControllerActionDescriptor? ResolveRoute(string path)
+    private (ControllerActionDescriptor?, Dictionary<string, string>) ResolveRouteWithParams(string path)
     {
+        var empty = new Dictionary<string, string>();
+
         // 1. Exact match
         if (_routes.TryGetValue(path, out var exact))
-            return exact;
+            return (exact, empty);
 
         // 2. Root "/" → cascading fallback
         if (path == "/")
         {
-            // Try /home/index (convention default)
             if (_routes.TryGetValue("/home/index", out var homeIndex))
-                return homeIndex;
-
-            // Ultimate fallback: first registered route (first controller, first action)
+                return (homeIndex, empty);
             if (_routes.Count > 0)
-                return _routes.Values.First();
-
-            return null;
+                return (_routes.Values.First(), empty);
+            return (null, empty);
         }
 
-        // 3. Append /index (e.g., /benchmark → /benchmark/index)
+        // 3. Parameterized route matching (e.g., /api/guests/abc123/freeze matches /api/guests/{id}/freeze)
+        var pathSegments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var kvp in _routes)
+        {
+            var routeTemplate = kvp.Key;
+            if (!routeTemplate.Contains('{')) continue;
+
+            var routeSegments = routeTemplate.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (routeSegments.Length != pathSegments.Length) continue;
+
+            bool match = true;
+            var values = new Dictionary<string, string>();
+            for (int i = 0; i < routeSegments.Length; i++)
+            {
+                if (routeSegments[i].StartsWith('{') && routeSegments[i].EndsWith('}'))
+                {
+                    var paramName = routeSegments[i].Trim('{', '}').ToLowerInvariant();
+                    values[paramName] = pathSegments[i];
+                }
+                else if (!string.Equals(routeSegments[i], pathSegments[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return (kvp.Value, values);
+        }
+
+        // 4. Append /index
         var withIndex = path + "/index";
         if (_routes.TryGetValue(withIndex, out var indexed))
-            return indexed;
+            return (indexed, empty);
 
-        // 4. Convention: treat path as /{controller}/{action}
+        // 5. Convention
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (segments.Length == 1)
         {
-            // Single segment → try as controller name with Index action
             var conventionIndex = $"/{segments[0]}/index";
             if (_routes.TryGetValue(conventionIndex, out var convIdx))
-                return convIdx;
+                return (convIdx, empty);
         }
         else if (segments.Length >= 2)
         {
-            // Try area convention: /{area}/{controller}/index
             var areaIndex = $"/{segments[0]}/{segments[1]}/index";
             if (_routes.TryGetValue(areaIndex, out var areaIdx))
-                return areaIdx;
+                return (areaIdx, empty);
         }
 
-        return null;
+        return (null, empty);
     }
 }
 
