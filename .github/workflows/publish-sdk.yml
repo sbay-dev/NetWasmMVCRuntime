@@ -93,10 +93,13 @@ jobs:
           dotnet nuget verify ./artifacts/NetWasmMvc.SDK.${{ steps.version.outputs.VERSION }}.nupkg || true
       
       - name: 🚀 Push to NuGet.org
-        if: ${{ secrets.NUGET_API_KEY != '' }}
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "⚠️ NUGET_API_KEY not set — skipping NuGet.org push"
+            exit 0
+          fi
           dotnet nuget push ./artifacts/NetWasmMvc.SDK.${{ steps.version.outputs.VERSION }}.nupkg \
             --api-key "$NUGET_API_KEY" \
             --source "${{ env.NUGET_SOURCE }}" \
