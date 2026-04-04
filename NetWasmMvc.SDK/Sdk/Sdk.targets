@@ -8,6 +8,15 @@
   <!-- ─── Import base WebAssembly SDK targets ─── -->
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk.WebAssembly" />
 
+  <!-- ─── Dev server: use Blazor dev server for F5/dotnet run ─── -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer"
+                      Version="$(BundledNETCoreAppPackageVersion)"
+                      IsImplicitlyDefined="true"
+                      PrivateAssets="all"
+                      Condition="'$(Configuration)' == 'Debug'" />
+  </ItemGroup>
+
   <!-- ═══ Strip AspNetCore runtime pack for WASM ═════════════ -->
   <!-- NuGet packages may declare a FrameworkReference to Microsoft.AspNetCore.App.
        The targeting pack (compile) is needed, but no runtime pack exists for browser-wasm.
