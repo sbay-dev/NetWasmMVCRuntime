@@ -42,10 +42,9 @@ public static class CephaApp
         // User's custom services
         configureServices?.Invoke(services);
 
-        // Register ILogger<> open generic fallback so any service/controller
-        // that depends on ILogger<T> resolves to a no-op browser logger
+        // Register ILogger<> open generic — browser console logger outputs to DevTools
         services.AddSingleton(typeof(Microsoft.Extensions.Logging.ILogger<>),
-                              typeof(Microsoft.Extensions.Logging.NullLogger<>));
+                              typeof(Microsoft.Extensions.Logging.BrowserConsoleLogger<>));
 
         var provider = services.BuildServiceProvider();
         return new CephaApplication(provider);
@@ -189,6 +188,70 @@ public class CephaApplication
         // Wire CephaKit server-side request handler
         JsExports.RegisterHandleRequestHandler(async (method, path, headersJson, body) =>
         {
+            // ─── API intercepts: abstract away server-only code paths ────
+            // These intercept API routes that rely on TCP/Process/File I/O
+            // and route through the proper WASM abstractions instead.
+#if HAS_NETCONTAINER_REF
+            var guestApiMatch = System.Text.RegularExpressions.Regex.Match(
+                path, @"^/api/guests/([^/]+)/(.+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (guestApiMatch.Success)
+            {
+                var guestId = guestApiMatch.Groups[1].Value;
+                var action = guestApiMatch.Groups[2].Value.ToLowerInvariant();
+                var orch = _provider.GetService<NetContainer.Ref.Orchestrator.IRefOrchestratorService>();
+                var guest = orch?.GetGuest(guestId);
+                if (guest == null)
+                    return System.Text.Json.JsonSerializer.Serialize(new { statusCode = 404, contentType = "application/json", body = "{\"error\":\"Guest not found\"}" });
+
+                try
+                {
+                    // Serial console: Controller uses TcpClient (unavailable in WASM)
+                    if (method == "POST" && action == "exec")
+                    {
+                        var reqObj = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(body ?? "{}");
+                        var command = reqObj.TryGetProperty("command", out var cmdProp) ? cmdProp.GetString() ?? "" : "";
+                        var result = await guest.Shell.RunAsync(command);
+                        var output = !string.IsNullOrEmpty(result.Stdout) ? result.Stdout : result.Stderr;
+                        var responseBody = System.Text.Json.JsonSerializer.Serialize(new { output });
+                        return System.Text.Json.JsonSerializer.Serialize(new { statusCode = 200, contentType = "application/json", body = responseBody });
+                    }
+
+                    // Boot log stream: Controller uses Response.WriteAsync SSE (unavailable in WASM)
+                    if (method == "GET" && action == "logs/stream")
+                    {
+                        var logLines = await guest.Logs.GetQemuLogAsync(200);
+                        var responseBody = System.Text.Json.JsonSerializer.Serialize(logLines);
+                        return System.Text.Json.JsonSerializer.Serialize(new { statusCode = 200, contentType = "application/json", body = responseBody });
+                    }
+
+                    // Freeze/Resume: Controller uses QMP over TCP
+                    if (method == "POST" && action == "freeze")
+                    {
+                        await guest.FreezeAsync();
+                        return System.Text.Json.JsonSerializer.Serialize(new { statusCode = 200, contentType = "application/json", body = "{\"ok\":true}" });
+                    }
+                    if (method == "POST" && action == "resume")
+                    {
+                        await guest.ResumeAsync();
+                        return System.Text.Json.JsonSerializer.Serialize(new { statusCode = 200, contentType = "application/json", body = "{\"ok\":true}" });
+                    }
+
+                    // Snapshot export: Controller uses file I/O + QMP
+                    if (method == "POST" && action == "snapshot")
+                    {
+                        var snapshotResult = await guest.ExportSnapshotAsync("browser-snapshots");
+                        var responseBody = System.Text.Json.JsonSerializer.Serialize(new { snapshotId = snapshotResult?.Info?.Id ?? "unknown", status = "completed" });
+                        return System.Text.Json.JsonSerializer.Serialize(new { statusCode = 200, contentType = "application/json", body = responseBody });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    var errBody = System.Text.Json.JsonSerializer.Serialize(new { error = ex.Message });
+                    return System.Text.Json.JsonSerializer.Serialize(new { statusCode = 500, contentType = "application/json", body = errBody });
+                }
+            }
+#endif
+
             using var scope = _provider.CreateScope();
             var context = new InternalHttpContext
             {

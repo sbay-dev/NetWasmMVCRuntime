@@ -3,7 +3,9 @@ using System.Threading;
 using Cepha;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+#if HAS_NETCONTAINER_REF
 using NetContainer.Ref;
+#endif
 
 namespace Microsoft.AspNetCore.Builder
 {
@@ -24,8 +26,10 @@ namespace Microsoft.AspNetCore.Builder
             return this;
         }
 
+#if HAS_NETCONTAINER_REF
         public CephaServiceCollection AddNetContainerRef(Action<RefOptions>? configure = null)
             => NetContainer.Ref.BrowserRefServiceRegistration.AddNetContainerRef(this, configure);
+#endif
     }
 
     /// <summary>
@@ -71,6 +75,9 @@ namespace Microsoft.AspNetCore.Builder
         public WebApplication UseWebSockets() => this;
 
         public CephaEndpointConventionBuilder MapNetContainerTerminal(string pattern = "/nc-terminal/{guestId}")
+            => new();
+
+        public CephaEndpointConventionBuilder MapNetContainerVnc(string pattern = "/nc-vnc/{guestId}")
             => new();
 
         public void Run()

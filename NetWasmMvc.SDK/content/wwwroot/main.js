@@ -467,14 +467,14 @@ window.fetch = function(input, init) {
     return _originalFetch(input, init);
 };
 
-// ─── EventSource Intercept: stub SSE for API paths ───────────
+// ─── EventSource Intercept: route SSE through worker fetch ───
 // EventSource doesn't use fetch, so the override above won't catch it.
-// For same-origin API paths, return a no-op EventSource that won't spam errors.
+// For same-origin API paths, we fetch log data through the worker and
+// emit events through a synthetic EventSource — proper abstraction.
 
 const _OriginalEventSource = window.EventSource;
 window.EventSource = function(url, opts) {
     if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//') && !/\.\w{2,5}(\?|$)/.test(url)) {
-        // Stub: create a fake EventSource for API SSE endpoints
         const fake = new EventTarget();
         fake.url = url;
         fake.readyState = 0; // CONNECTING
@@ -482,8 +482,36 @@ window.EventSource = function(url, opts) {
         fake.onopen = null;
         fake.onmessage = null;
         fake.onerror = null;
-        // Silently stay closed — the browser stub has no streaming data
-        setTimeout(() => { fake.readyState = 2; }, 0);
+
+        // Fetch log data through worker, then emit as SSE events
+        (async () => {
+            try {
+                const id = ++_fetchMsgId;
+                const responseJson = await new Promise(resolve => {
+                    _fetchPending.set(id, resolve);
+                    worker.postMessage({ type: 'fetch', id, method: 'GET', path: url, body: null });
+                });
+                const parsed = JSON.parse(responseJson);
+                let lines = [];
+                try { lines = JSON.parse(parsed.body || '[]'); } catch { lines = []; }
+                if (!Array.isArray(lines)) lines = [];
+
+                fake.readyState = 1; // OPEN
+                if (fake.onopen) fake.onopen(new Event('open'));
+
+                for (let i = 0; i < lines.length; i++) {
+                    if (fake.readyState === 2) break;
+                    await new Promise(r => setTimeout(r, 60));
+                    const evt = new MessageEvent('message', { data: JSON.stringify(lines[i]) });
+                    if (fake.onmessage) fake.onmessage(evt);
+                    try { fake.dispatchEvent(evt); } catch {}
+                }
+            } catch (e) {
+                if (__DEV__) console.warn('🧬 EventSource stub error:', e);
+                if (fake.onerror) fake.onerror(new Event('error'));
+            }
+        })();
+
         return fake;
     }
     return new _OriginalEventSource(url, opts);

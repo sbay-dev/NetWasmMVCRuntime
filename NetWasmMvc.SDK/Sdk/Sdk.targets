@@ -8,14 +8,149 @@
   <!-- ─── Import base WebAssembly SDK targets ─── -->
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk.WebAssembly" />
 
-  <!-- ─── Dev server: use Blazor dev server for F5/dotnet run ─── -->
+  <!-- ═══ WASM App Bundle & _framework static-web-asset pipeline ═══════
+       The .NET workload forces WasmGenerateAppBundle=false.  We re-enable it
+       so WasmAppBuilder creates _framework/ with dotnet.boot.js + assemblies.
+       We also disable auto-run so WasmBuildApp fires at the correct time —
+       during ResolveBuildRelatedStaticWebAssets, BEFORE the manifest is written. -->
+  <PropertyGroup>
+    <WasmGenerateAppBundle>true</WasmGenerateAppBundle>
+    <WasmBuildAppAfterThisTarget></WasmBuildAppAfterThisTarget>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <ResolveBuildRelatedStaticWebAssetsDependsOn>
+      $(ResolveBuildRelatedStaticWebAssetsDependsOn);
+      _CephaResolveFrameworkAssets
+    </ResolveBuildRelatedStaticWebAssetsDependsOn>
+  </PropertyGroup>
+
+  <!-- Override HTML asset placeholder targets — not needed for WASM SPA host
+       and .NET 10 throws on duplicate _framework asset mappings -->
+  <Target Name="GenerateHtmlAssetPlaceholdersBuildStaticWebAssets" />
+  <Target Name="ResolveHtmlAssetPlaceholdersBuildStaticWebAssets" />
+
+  <!-- Run WasmBuildApp manually (generates _framework/ with boot config + assemblies).
+       We depend on CopyFilesToOutputDirectory to ensure @(MainAssembly) is populated. -->
+  <Target Name="_CephaWasmBuild"
+          DependsOnTargets="CopyFilesToOutputDirectory;ResolveReferences;WasmBuildApp" />
+
+  <!-- ═══ Stream MIME: Explicit content-type mappings for WASM assets ═══
+       Guarantees correct MIME types for ALL _framework file types.
+       The DevServer serves files based on these endpoint metadata entries,
+       not file-extension inference.  This prevents empty/wrong Content-Type
+       headers that break ES module loading and WASM instantiation.
+       Format: Include=MIME-type  Pattern=*.ext  Priority=0 (high). -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer"
-                      Version="$(BundledNETCoreAppPackageVersion)"
-                      IsImplicitlyDefined="true"
-                      PrivateAssets="all"
-                      Condition="'$(Configuration)' == 'Debug'" />
+    <StaticWebAssetContentTypeMapping Include="text/javascript"           Cache="no-cache" Pattern="*.js"   Priority="10" />
+    <StaticWebAssetContentTypeMapping Include="text/javascript"           Cache="no-cache" Pattern="*.mjs"  Priority="10" />
+    <StaticWebAssetContentTypeMapping Include="application/wasm"          Cache="no-cache" Pattern="*.wasm" Priority="10" />
+    <StaticWebAssetContentTypeMapping Include="application/json"          Cache="no-cache" Pattern="*.json" Priority="10" />
+    <StaticWebAssetContentTypeMapping Include="application/octet-stream"  Cache="no-cache" Pattern="*.dat"  Priority="1" />
+    <StaticWebAssetContentTypeMapping Include="application/octet-stream"  Cache="no-cache" Pattern="*.blat" Priority="1" />
+    <StaticWebAssetContentTypeMapping Include="application/octet-stream"  Cache="no-cache" Pattern="*.pdb"  Priority="1" />
+    <StaticWebAssetContentTypeMapping Include="application/octet-stream"  Cache="no-cache" Pattern="*.dll"  Priority="1" />
   </ItemGroup>
+
+  <!-- Register _framework/ files as StaticWebAssets so the dev server can serve them.
+       WasmAppBuilder writes to $(WasmAppDir) (AppBundle/) which gets cleaned by
+       RemoveDir on every rebuild.  We copy _framework to a stable intermediate
+       directory so the runtime manifest always resolves to physical files. -->
+  <PropertyGroup>
+    <_CephaFrameworkRoot>$([MSBuild]::NormalizeDirectory($(MSBuildProjectDirectory), $(IntermediateOutputPath), 'cepha-framework'))</_CephaFrameworkRoot>
+    <_CephaManifestStamp>$([MSBuild]::NormalizePath($(MSBuildProjectDirectory), $(IntermediateOutputPath), 'cepha-manifest.stamp'))</_CephaManifestStamp>
+  </PropertyGroup>
+
+  <Target Name="_CephaResolveFrameworkAssets"
+          DependsOnTargets="_CephaWasmBuild">
+
+    <!-- Copy _framework from ephemeral AppBundle to stable intermediate dir -->
+    <ItemGroup>
+      <_CephaFrameworkSource Include="$(WasmAppDir)_framework\**\*.*" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(_CephaFrameworkRoot)_framework" />
+    <Copy SourceFiles="@(_CephaFrameworkSource)"
+          DestinationFiles="@(_CephaFrameworkSource->'$(_CephaFrameworkRoot)_framework\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+
+    <!-- Now glob the stable copy -->
+    <ItemGroup>
+      <_CephaFrameworkFile Include="$(_CephaFrameworkRoot)_framework\**\*.*" />
+    </ItemGroup>
+
+    <DefineStaticWebAssets
+      CandidateAssets="@(_CephaFrameworkFile)"
+      SourceId="$(PackageId)"
+      SourceType="Computed"
+      AssetKind="All"
+      AssetRole="Primary"
+      AssetTraitName="WasmResource"
+      AssetTraitValue="runtime"
+      CopyToOutputDirectory="PreserveNewest"
+      CopyToPublishDirectory="PreserveNewest"
+      ContentRoot="$(_CephaFrameworkRoot)"
+      BasePath="$(StaticWebAssetBasePath)">
+      <Output TaskParameter="Assets" ItemName="_CephaFrameworkStaticWebAsset" />
+    </DefineStaticWebAssets>
+
+    <DefineStaticWebAssetEndpoints
+      CandidateAssets="@(_CephaFrameworkStaticWebAsset)"
+      ExistingEndpoints="@(StaticWebAssetEndpoint)"
+      ContentTypeMappings="@(StaticWebAssetContentTypeMapping)">
+      <Output TaskParameter="Endpoints" ItemName="_CephaFrameworkEndpoint" />
+    </DefineStaticWebAssetEndpoints>
+
+    <ItemGroup>
+      <StaticWebAsset Include="@(_CephaFrameworkStaticWebAsset)" />
+      <StaticWebAssetEndpoint Include="@(_CephaFrameworkEndpoint)" />
+    </ItemGroup>
+
+    <!-- Write a stamp file so the manifest task detects a change on
+         incremental builds and doesn't skip regeneration. -->
+    <WriteLinesToFile File="$(_CephaManifestStamp)"
+                     Lines="@(_CephaFrameworkFile->'%(Identity)|%(ModifiedTime)')"
+                     Overwrite="true" />
+
+    <Message Importance="high"
+             Text="🧬 Stream MIME: Registered @(_CephaFrameworkStaticWebAsset->Count()) _framework assets with explicit content-type mappings" />
+  </Target>
+
+  <!-- Force manifest regeneration: delete stale build/dev manifests before
+       GenerateStaticWebAssetsManifest runs, so the pipeline never serves
+       an outdated manifest that omits _framework entries. -->
+  <Target Name="_CephaInvalidateStaleManifest"
+          BeforeTargets="GenerateStaticWebAssetsManifest"
+          Condition="Exists('$(_CephaManifestStamp)')">
+    <Delete Files="$(StaticWebAssetBuildManifestPath)"
+            Condition="Exists('$(StaticWebAssetBuildManifestPath)')" />
+  </Target>
+
+  <!-- Fix .NET 10.0.3 WASM pipeline bug: both native and manifest dotnet.js
+       get same RelativePath pattern causing GenerateStaticWebAssetsManifest
+       to throw. Remove the smaller native copy, keep the manifest version. -->
+  <Target Name="_CephaFixDotnetJsConflict" BeforeTargets="GenerateStaticWebAssetsManifest">
+    <ItemGroup>
+      <StaticWebAsset Remove="@(StaticWebAsset)"
+        Condition="'%(AssetTraitName)' == 'WasmResource' and '%(AssetTraitValue)' == 'native' and $([System.String]::new('%(RelativePath)').Contains('dotnet#'))" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Copy endpoints/runtime manifests to output dir.
+       GenerateStaticWebAssetsManifest creates them AFTER CopyFilesToOutputDirectory
+       already ran during CoreBuild, so the normal ContentWithTargetPath mechanism
+       misses them on the first build. -->
+  <Target Name="_CephaCopyStaticWebAssetManifests"
+          AfterTargets="GenerateStaticWebAssetsManifest">
+    <Copy Condition="Exists('$(StaticWebAssetEndpointsBuildManifestPath)')"
+          SourceFiles="$(StaticWebAssetEndpointsBuildManifestPath)"
+          DestinationFiles="$([MSBuild]::NormalizePath($(MSBuildProjectDirectory), $(OutputPath)))$(TargetName).staticwebassets.endpoints.json"
+          OverwriteReadOnlyFiles="true" />
+    <Copy Condition="Exists('$(StaticWebAssetDevelopmentManifestPath)')"
+          SourceFiles="$(StaticWebAssetDevelopmentManifestPath)"
+          DestinationFiles="$([MSBuild]::NormalizePath($(MSBuildProjectDirectory), $(OutputPath)))$(TargetName).staticwebassets.runtime.json"
+          OverwriteReadOnlyFiles="true" />
+  </Target>
 
   <!-- ═══ Strip AspNetCore runtime pack for WASM ═════════════ -->
   <!-- NuGet packages may declare a FrameworkReference to Microsoft.AspNetCore.App.
@@ -71,9 +206,13 @@
           BeforeTargets="_ResolveWasmOutputs"
           Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
     <ItemGroup Condition="Exists('$(_CephaAspNetCoreSharedDir)')">
-      <ReferenceCopyLocalPaths Include="$(_CephaAspNetCoreSharedDir)\*.dll" />
+      <!-- Exclude assemblies whose filename already appears in ReferenceCopyLocalPaths
+           to prevent MetadataLoadContext duplicate-load errors in ManagedToNativeGenerator. -->
+      <_CephaAspNetCandidate Include="$(_CephaAspNetCoreSharedDir)\*.dll"
+                              Exclude="@(ReferenceCopyLocalPaths->'$(_CephaAspNetCoreSharedDir)\%(Filename)%(Extension)')" />
+      <ReferenceCopyLocalPaths Include="@(_CephaAspNetCandidate)" />
     </ItemGroup>
-    <Message Importance="high" Text="🧬 Cepha: Bundling ASP.NET Core runtime for WASM from $(_CephaAspNetCoreSharedDir)"
+    <Message Importance="high" Text="🧬 Cepha: Bundling @(_CephaAspNetCandidate->Count()) ASP.NET Core assemblies for WASM (deduped)"
              Condition="Exists('$(_CephaAspNetCoreSharedDir)')" />
   </Target>
 
@@ -98,9 +237,10 @@
                                 Condition="$([System.String]::new('%(FileName)').StartsWith('Microsoft.AspNetCore.'))" />
       <ResolvedFileToPublish Remove="@(_CephaAspNetRefToRemove)" />
     </ItemGroup>
-    <!-- Step 2: Gather DLLs into a private list (avoids batching interference) -->
+    <!-- Step 2: Gather DLLs, excluding those already in publish list -->
     <ItemGroup Condition="Exists('$(_CephaAspNetCoreSharedDir)')">
-      <_CephaAspNetCoreDlls Include="$(_CephaAspNetCoreSharedDir)\*.dll" />
+      <_CephaAspNetCoreDlls Include="$(_CephaAspNetCoreSharedDir)\*.dll"
+                             Exclude="@(ResolvedFileToPublish->'$(_CephaAspNetCoreSharedDir)\%(Filename)%(Extension)')" />
     </ItemGroup>
     <!-- Step 3: Add each DLL with correct per-item metadata -->
     <ItemGroup Condition="Exists('$(_CephaAspNetCoreSharedDir)')">
@@ -158,6 +298,18 @@
   </ItemGroup>
 
   <!-- ═══ Shared Source Files (compiled into consumer project) ═ -->
+
+  <!-- Detect NetContainer.Ref in consumer's PackageReference and define HAS_NETCONTAINER_REF -->
+  <Target Name="_DetectNetContainerRef" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <_NcRefList>;@(PackageReference);</_NcRefList>
+      <_HasNcRef>$(_NcRefList.Contains(';NetContainer.Ref;'))</_HasNcRef>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(_HasNcRef)' == 'True'">
+      <DefineConstants>$(DefineConstants);HAS_NETCONTAINER_REF</DefineConstants>
+    </PropertyGroup>
+  </Target>
+
   <ItemGroup>
     <Compile Include="$(_NwmSdkRoot)shared\JsInterop.cs"            Link="Cepha\JsInterop.cs"            Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\JsExports.cs"            Link="Cepha\JsExports.cs"            Visible="false" />
@@ -262,7 +414,7 @@
           AfterTargets="Build"
           Condition="'$(CephaKitEnabled)' == 'true' AND '$(Configuration)' == 'Debug'">
     <PropertyGroup>
-      <_CephaKitWwwroot>$(OutputPath)wwwroot</_CephaKitWwwroot>
+      <_CephaKitWwwroot>$([MSBuild]::NormalizePath($(MSBuildProjectDirectory), $(OutputPath), 'wwwroot'))</_CephaKitWwwroot>
       <_CephaKitScript>$(_CephaKitWwwroot)\cepha-server.mjs</_CephaKitScript>
       <_CephaKitCert>$(MSBuildProjectDirectory)\obj\cepha-dev.pem</_CephaKitCert>
       <_CephaKitKey>$(MSBuildProjectDirectory)\obj\cepha-dev.key</_CephaKitKey>
