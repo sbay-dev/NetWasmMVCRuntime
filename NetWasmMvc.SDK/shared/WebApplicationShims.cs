@@ -74,6 +74,13 @@ namespace Microsoft.AspNetCore.Builder
         public WebApplication UseAuthorization() => this;
         public WebApplication UseWebSockets() => this;
 
+        /// <summary>
+        /// Registers middleware. In browser-WASM, requests bypass the HTTP pipeline
+        /// (routed directly via CephaApp → MvcEngine), so middleware is not invoked.
+        /// This overload exists for API parity so app code compiles unchanged.
+        /// </summary>
+        public WebApplication Use(Func<Microsoft.AspNetCore.Http.HttpContext, Func<Task>, Task> middleware) => this;
+
         public CephaEndpointConventionBuilder MapNetContainerTerminal(string pattern = "/nc-terminal/{guestId}")
             => new();
 

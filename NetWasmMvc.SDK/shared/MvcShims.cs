@@ -88,7 +88,7 @@ namespace Microsoft.AspNetCore.Mvc
     // HTTP helpers — Controller.Response / Controller.Request
     // ═══════════════════════════════════════════════════════════
 
-    /// <summary>String-keyed header dictionary with named accessors for common headers.</summary>
+    /// <summary>String-keyed header dictionary matching ASP.NET Core IHeaderDictionary surface.</summary>
     public class HeaderDictionary : Dictionary<string, string>
     {
         public string? CacheControl
@@ -102,26 +102,44 @@ namespace Microsoft.AspNetCore.Mvc
             get => TryGetValue("Connection", out var v) ? v : null;
             set { if (value != null) this["Connection"] = value; else Remove("Connection"); }
         }
+
+        /// <summary>Appends a value to the header. Multi-value headers are comma-separated.</summary>
+        public void Append(string key, string value)
+        {
+            if (TryGetValue(key, out var existing))
+                this[key] = existing + ", " + value;
+            else
+                this[key] = value;
+        }
     }
 
-    /// <summary>Browser-WASM HTTP response stub. SSE streaming is no-op.</summary>
+    /// <summary>Browser-WASM HTTP response with ASP.NET Core API surface.</summary>
     public class CephaHttpResponse
     {
         public int StatusCode { get; set; } = 200;
         public string? ContentType { get; set; }
         public HeaderDictionary Headers { get; } = new();
-        public Stream Body { get; } = Stream.Null;
 
-        public Task WriteAsync(string text, CancellationToken ct = default)
-            => Task.CompletedTask;
+        private readonly MemoryStream _body = new();
+        public Stream Body => _body;
+
+        public async Task WriteAsync(string text, CancellationToken ct = default)
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(text);
+            await _body.WriteAsync(bytes, ct);
+        }
     }
 
-    /// <summary>Browser-WASM HTTP request stub.</summary>
+    /// <summary>Browser-WASM HTTP request with ASP.NET Core API surface.</summary>
     public class CephaHttpRequest
     {
         public string Method { get; set; } = "GET";
         public string Path { get; set; } = "/";
         public HeaderDictionary Headers { get; } = new();
+        public Stream Body { get; set; } = Stream.Null;
+        public string? ContentType { get; set; }
+        public long? ContentLength { get; set; }
+        public string QueryString { get; set; } = "";
     }
 
     // ═══════════════════════════════════════════════════════════

@@ -239,8 +239,47 @@ public class CephaApplication
                     // Snapshot export: Controller uses file I/O + QMP
                     if (method == "POST" && action == "snapshot")
                     {
-                        var snapshotResult = await guest.ExportSnapshotAsync("browser-snapshots");
-                        var responseBody = System.Text.Json.JsonSerializer.Serialize(new { snapshotId = snapshotResult?.Info?.Id ?? "unknown", status = "completed" });
+                        var snapshotResult = await orch.ExportSnapshotAsync(guestId, "browser-snapshots");
+                        // Serialize in same shape as controller's Json(SnapshotExportResult)
+                        var responseBody = System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            success = snapshotResult?.Success ?? false,
+                            info = snapshotResult?.Info != null ? new { id = snapshotResult.Info.Id, guestId = snapshotResult.Info.GuestId } : null,
+                            error = snapshotResult?.Error
+                        });
+                        return System.Text.Json.JsonSerializer.Serialize(new { statusCode = 200, contentType = "application/json", body = responseBody });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    var errBody = System.Text.Json.JsonSerializer.Serialize(new { error = ex.Message });
+                    return System.Text.Json.JsonSerializer.Serialize(new { statusCode = 500, contentType = "application/json", body = errBody });
+                }
+            }
+
+            // Intercept snapshot routes: /api/snapshots and /api/snapshots/{id}/restore
+            if (path.StartsWith("/api/snapshots", StringComparison.OrdinalIgnoreCase))
+            {
+                var orch = _provider.GetService<NetContainer.Ref.Orchestrator.IRefOrchestratorService>();
+                try
+                {
+                    // POST /api/snapshots/{id}/restore
+                    var restoreMatch = System.Text.RegularExpressions.Regex.Match(
+                        path, @"^/api/snapshots/([^/]+)/restore$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (method == "POST" && restoreMatch.Success)
+                    {
+                        var snapId = restoreMatch.Groups[1].Value;
+                        var ctx = await orch.StartFromSnapshotAsync(snapId, ct: default);
+                        var responseBody = System.Text.Json.JsonSerializer.Serialize(new { status = "restored", guestId = ctx.Id, sshPort = ctx.SshPort, httpPort = ctx.HttpPort });
+                        return System.Text.Json.JsonSerializer.Serialize(new { statusCode = 200, contentType = "application/json", body = responseBody });
+                    }
+
+                    // GET /api/snapshots
+                    if (method == "GET" && path.Equals("/api/snapshots", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var snaps = orch.ListSnapshots();
+                        var jsonOpts = new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
+                        var responseBody = System.Text.Json.JsonSerializer.Serialize(snaps, jsonOpts);
                         return System.Text.Json.JsonSerializer.Serialize(new { statusCode = 200, contentType = "application/json", body = responseBody });
                     }
                 }

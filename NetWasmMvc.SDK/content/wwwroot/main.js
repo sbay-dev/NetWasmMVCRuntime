@@ -214,7 +214,10 @@ function applyFrame(frame) {
     switch (frame.op) {
         case 'setInnerHTML':
             // Resolve ~/ prefix in attribute values (fallback — C# PostProcessHtml handles this too)
-            el.innerHTML = frame.value.replace(/(href|src|action)\s*=\s*"~\//g, '$1="/');
+            let html = frame.value.replace(/(href|src|action)\s*=\s*"~\//g, '$1="/');
+            // Strip scoped CSS isolation links (*.styles.css) — not generated in WASM mode
+            html = html.replace(/<link[^>]*href="[^"]*\.styles\.css[^"]*"[^>]*\/?>/gi, '');
+            el.innerHTML = html;
             // Execute <script> tags — innerHTML doesn't run them natively
             activateScripts(el);
             CephaLoader.hideOverlay();
@@ -703,6 +706,607 @@ window.CephaData = (() => {
         get isPremium() { return false; }
     };
 })();
+
+// ─── WebSocket Intercept: VNC in WASM mode ──────────────────
+// In WASM mode there is no real QEMU, so VNC WebSocket connections
+// to /nc-vnc/{guestId} are intercepted and served by a synthetic
+// RFB server that renders an interactive OpenWrt TTY on the noVNC canvas.
+
+const _OriginalWebSocket = window.WebSocket;
+
+window.WebSocket = function(url, protocols) {
+    // Only intercept nc-vnc paths (VNC bridge endpoint)
+    if (typeof url === 'string' && url.includes('/nc-vnc/')) {
+        const guestIdMatch = url.match(/\/nc-vnc\/([^/?#]+)/);
+        const guestId = guestIdMatch ? guestIdMatch[1] : 'unknown';
+        if (__DEV__) console.log(`🖥 VNC-TTY: intercepting WebSocket for guest ${guestId.substring(0, 12)}…`);
+        return new CephaTtySocket(url, guestId);
+    }
+    // Pass through all other WebSocket connections
+    if (protocols !== undefined) return new _OriginalWebSocket(url, protocols);
+    return new _OriginalWebSocket(url);
+};
+// Preserve WebSocket constants
+window.WebSocket.CONNECTING = 0;
+window.WebSocket.OPEN = 1;
+window.WebSocket.CLOSING = 2;
+window.WebSocket.CLOSED = 3;
+window.WebSocket.prototype = _OriginalWebSocket.prototype;
+
+// ─── CephaTtySocket: synthetic RFB WebSocket for WASM VNC ───
+// Implements just enough of the RFB 3.8 handshake + FramebufferUpdate
+// to satisfy noVNC's RFB client, rendering a text-mode TTY.
+
+class CephaTtySocket {
+    constructor(url, guestId) {
+        this.url = url;
+        this._guestId = guestId;
+        this.readyState = 0; // CONNECTING
+        this.binaryType = 'arraybuffer';
+        this.protocol = 'binary';
+        this.extensions = '';
+        this.bufferedAmount = 0;
+        this.onopen = null;
+        this.onmessage = null;
+        this.onclose = null;
+        this.onerror = null;
+        this._listeners = {};
+        this._phase = 'version'; // version → security → secresult → init → running
+        this._closed = false;
+
+        // TTY state: 80x24 text terminal
+        this._cols = 80;
+        this._rows = 24;
+        this._charW = 8;
+        this._charH = 16;
+        this._width = this._cols * this._charW;   // 640
+        this._height = this._rows * this._charH;  // 384
+        this._lines = [];
+        this._scrollback = [];       // lines that scrolled off top
+        this._scrollOffset = 0;      // 0 = bottom (live), >0 = scrolled up
+        this._maxScrollback = 500;
+        this._cursorX = 0;
+        this._cursorY = 0;
+        this._inputBuffer = '';
+        for (let i = 0; i < this._rows; i++) this._lines.push('');
+
+        // Boot content
+        this._bootLines = [
+            'BusyBox v1.36.1 (OpenWrt r28427-6df0e3d02a) built-in shell (ash)',
+            '',
+            '  _______                     ________        __',
+            ' |       |.-----.-----.-----.|  |  |  |.----.|  |_',
+            ' |   -   ||  _  |  -__|     ||  |  |  ||   _||   _|',
+            ' |_______||   __|_____|__|__||________||__|  |____|',
+            '          |__| W I R E L E S S   F R E E D O M',
+            ' -----------------------------------------------------',
+            ' OpenWrt 24.10.5, r28427-6df0e3d02a',
+            ' -----------------------------------------------------',
+            '',
+        ];
+        this._promptStr = 'root@OpenWrt:~# ';
+        this._booted = false;
+        this._cmdHistory = [];
+        this._dirty = true;          // first frame must be sent
+        this._updateRequested = false; // client hasn't asked yet
+        this._frameThrottle = null;  // rAF handle for throttled delivery
+
+        // Start handshake after current sync code completes
+        Promise.resolve().then(() => {
+            try { this._startHandshake(); }
+            catch (e) { console.error('🖥 VNC-TTY: _startHandshake error:', e); }
+        });
+    }
+
+    addEventListener(type, fn) {
+        if (!this._listeners[type]) this._listeners[type] = [];
+        this._listeners[type].push(fn);
+    }
+    removeEventListener(type, fn) {
+        const arr = this._listeners[type];
+        if (arr) this._listeners[type] = arr.filter(f => f !== fn);
+    }
+    dispatchEvent(evt) {
+        if (this['on' + evt.type]) this['on' + evt.type](evt);
+        (this._listeners[evt.type] || []).forEach(fn => fn(evt));
+        return true;
+    }
+    _emit(type, props) {
+        const evt = Object.assign({ type }, props || {});
+        try {
+            if (this['on' + type]) this['on' + type](evt);
+            (this._listeners[type] || []).forEach(fn => fn(evt));
+        } catch (e) {
+            console.error(`🖥 VNC-TTY: _emit(${type}) error:`, e);
+        }
+    }
+
+    _startHandshake() {
+        if (this._closed) return;
+        console.log('🖥 VNC-TTY: handshake started');
+        this.readyState = 1; // OPEN
+        this._emit('open');
+        // Send RFB 3.8 version string on next microtask
+        Promise.resolve().then(() => {
+            if (this._closed) return;
+            const ver = new TextEncoder().encode('RFB 003.008\n');
+            this._deliverMessage(ver.buffer);
+        });
+    }
+
+    // Called by noVNC Websock.flush() → _websocket.send()
+    send(data) {
+        if (this._closed) return;
+        // Properly handle Uint8Array views (noVNC sends subarray of sQ buffer)
+        let bytes;
+        if (data instanceof Uint8Array) {
+            bytes = new Uint8Array(data); // copy to avoid stale buffer views
+        } else if (data instanceof ArrayBuffer) {
+            bytes = new Uint8Array(data);
+        } else {
+            bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        }
+
+        try {
+            switch (this._phase) {
+                case 'version':
+                    this._phase = 'security';
+                    this._deliverMessage(new Uint8Array([1, 1]).buffer);
+                    break;
+
+                case 'security':
+                    this._phase = 'secresult';
+                    const sr = new ArrayBuffer(4);
+                    new DataView(sr).setUint32(0, 0);
+                    this._deliverMessage(sr);
+                    break;
+
+                case 'secresult':
+                    this._phase = 'init';
+                    this._sendServerInit();
+                    break;
+
+                case 'init':
+                case 'running':
+                    this._phase = 'running';
+                    this._handleClientMessage(bytes);
+                    break;
+            }
+        } catch (e) {
+            console.error(`🖥 VNC-TTY: send() error in phase ${this._phase}:`, e);
+        }
+    }
+
+    // Deliver binary data to noVNC
+    _deliverMessage(buffer) {
+        if (this._closed) return;
+        // Use setTimeout (macrotask) to yield to the event loop between frames
+        // This prevents microtask storms that freeze the browser
+        setTimeout(() => {
+            if (this._closed) return;
+            this._emit('message', { data: buffer });
+        }, 0);
+    }
+
+    _sendServerInit() {
+        // ServerInit: width(2) + height(2) + pixel_format(16) + name_length(4) + name
+        const name = 'OpenWrt TTY';
+        const nameBytes = new TextEncoder().encode(name);
+        const buf = new ArrayBuffer(24 + nameBytes.length);
+        const dv = new DataView(buf);
+        dv.setUint16(0, this._width);   // width  (big-endian default)
+        dv.setUint16(2, this._height);  // height
+        // Pixel format: 32bpp, depth 24, big-endian=0, true-color=1
+        dv.setUint8(4, 32);  // bpp
+        dv.setUint8(5, 24);  // depth
+        dv.setUint8(6, 0);   // big-endian
+        dv.setUint8(7, 1);   // true-color
+        dv.setUint16(8, 255);  // red-max
+        dv.setUint16(10, 255); // green-max
+        dv.setUint16(12, 255); // blue-max
+        dv.setUint8(14, 16);  // red-shift
+        dv.setUint8(15, 8);   // green-shift
+        dv.setUint8(16, 0);   // blue-shift
+        // 3 bytes padding (17, 18, 19) — already 0
+        dv.setUint32(20, nameBytes.length); // name length (big-endian)
+        const u8 = new Uint8Array(buf);
+        u8.set(nameBytes, 24);
+        console.log(`🖥 VNC-TTY: connected ${this._width}x${this._height}`);
+        this._deliverMessage(buf);
+
+        // Boot sequence after handshake settles
+        setTimeout(() => this._runBoot(), 200);
+    }
+
+    async _runBoot() {
+        for (const line of this._bootLines) {
+            this._writeLine(line);
+            await this._delay(40);
+        }
+        this._writePrompt();
+        this._booted = true;
+    }
+
+    _handleClientMessage(bytes) {
+        if (bytes.length === 0) return;
+        const msgType = bytes[0];
+
+        switch (msgType) {
+            case 0: // SetPixelFormat — ignore
+                break;
+            case 2: // SetEncodings — ignore
+                break;
+            case 3: // FramebufferUpdateRequest
+                // Only send a frame if content has changed (dirty flag)
+                if (this._dirty) {
+                    this._dirty = false;
+                    this._updateRequested = false;
+                    this._scheduleFrame();
+                } else {
+                    this._updateRequested = true; // remember client wants an update
+                }
+                break;
+            case 4: // KeyEvent
+                if (bytes.length >= 8) {
+                    const downFlag = bytes[1];
+                    const keysym = (bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7];
+                    if (downFlag) this._handleKey(keysym);
+                }
+                break;
+            case 5: // PointerEvent — handle scroll wheel
+                if (bytes.length >= 6) {
+                    const buttonMask = bytes[1];
+                    // Button 4 (bit 3) = scroll up, Button 5 (bit 4) = scroll down
+                    if (buttonMask & 8) this._scroll(3);   // scroll up 3 lines
+                    if (buttonMask & 16) this._scroll(-3);  // scroll down 3 lines
+                }
+                break;
+            case 6: // ClientCutText — ignore
+                break;
+        }
+    }
+
+    // Schedule a frame delivery on next animation frame (throttled)
+    _scheduleFrame() {
+        if (this._frameThrottle || this._closed) return;
+        this._frameThrottle = requestAnimationFrame(() => {
+            this._frameThrottle = null;
+            if (!this._closed) this._sendFullFrame();
+        });
+    }
+
+    // Scroll the TTY view through scrollback history
+    _scroll(delta) {
+        const maxOffset = this._scrollback.length;
+        const newOffset = Math.max(0, Math.min(maxOffset, this._scrollOffset + delta));
+        if (newOffset !== this._scrollOffset) {
+            this._scrollOffset = newOffset;
+            this._markDirty();
+        }
+    }
+
+    // Mark content as changed; if client is waiting, schedule a frame
+    _markDirty() {
+        this._dirty = true;
+        if (this._updateRequested) {
+            this._updateRequested = false;
+            this._dirty = false;
+            this._scheduleFrame();
+        }
+    }
+
+    _handleKey(keysym) {
+        // Enter
+        if (keysym === 0xff0d) {
+            const cmd = this._inputBuffer.trim();
+            this._inputBuffer = '';
+            // The prompt+cmd is already displayed at _lines[_cursorY]
+            // Just advance to next line
+            this._cursorY++;
+            if (cmd) {
+                this._cmdHistory.push(cmd);
+                this._executeCommand(cmd);
+            } else {
+                this._writePrompt();
+            }
+            return;
+        }
+        // Backspace
+        if (keysym === 0xff08) {
+            if (this._inputBuffer.length > 0) {
+                this._inputBuffer = this._inputBuffer.slice(0, -1);
+                this._redrawCurrentLine();
+            }
+            return;
+        }
+        // Regular printable char
+        if (keysym >= 0x20 && keysym <= 0x7e) {
+            this._inputBuffer += String.fromCharCode(keysym);
+            this._redrawCurrentLine();
+            return;
+        }
+    }
+
+    async _executeCommand(cmd) {
+        // Route through the WASM serial API
+        try {
+            const id = ++_fetchMsgId;
+            const responseJson = await new Promise(resolve => {
+                _fetchPending.set(id, resolve);
+                worker.postMessage({
+                    type: 'fetch', id,
+                    method: 'POST',
+                    path: `/api/guests/${this._guestId}/exec`,
+                    body: JSON.stringify({ command: cmd })
+                });
+            });
+            const parsed = JSON.parse(responseJson);
+            let output = '';
+            try {
+                const bodyObj = JSON.parse(parsed.body || '{}');
+                output = bodyObj.output || '';
+            } catch { output = parsed.body || ''; }
+            if (output) {
+                const lines = output.split('\n');
+                for (const line of lines) {
+                    this._writeLine(line);
+                }
+            }
+        } catch (err) {
+            this._writeLine(`-ash: error: ${err.message}`);
+        }
+        this._writePrompt();
+    }
+
+    _writeLine(text) {
+        if (this._cursorY >= this._rows) {
+            // Push scrolled-off line to scrollback
+            const lost = this._lines.shift();
+            this._scrollback.push(lost);
+            if (this._scrollback.length > this._maxScrollback) this._scrollback.shift();
+            this._lines.push('');
+            this._cursorY = this._rows - 1;
+        }
+        this._lines[this._cursorY] = text;
+        this._cursorY++;
+        this._cursorX = 0;
+        this._scrollOffset = 0; // snap to bottom on new output
+        this._markDirty();
+    }
+
+    _writePrompt() {
+        if (this._cursorY >= this._rows) {
+            const lost = this._lines.shift();
+            this._scrollback.push(lost);
+            if (this._scrollback.length > this._maxScrollback) this._scrollback.shift();
+            this._lines.push('');
+            this._cursorY = this._rows - 1;
+        }
+        this._lines[this._cursorY] = this._promptStr + this._inputBuffer;
+        this._cursorX = this._promptStr.length + this._inputBuffer.length;
+        this._scrollOffset = 0;
+        this._markDirty();
+    }
+
+    _redrawCurrentLine() {
+        this._lines[this._cursorY] = this._promptStr + this._inputBuffer;
+        this._cursorX = this._promptStr.length + this._inputBuffer.length;
+        this._markDirty();
+    }
+
+    _sendFullFrame() {
+        // RFB FramebufferUpdate message
+        // Render text to RGBA pixel buffer
+        const w = this._width;
+        const h = this._height;
+        const pixels = new Uint8Array(w * h * 4);
+
+        // Black background
+        for (let i = 3; i < pixels.length; i += 4) pixels[i] = 255;
+
+        // Build visible lines array based on scroll offset
+        const allLines = [...this._scrollback, ...this._lines];
+        const totalLines = allLines.length;
+        const viewEnd = totalLines - this._scrollOffset;
+        const viewStart = Math.max(0, viewEnd - this._rows);
+
+        // Render each character
+        for (let row = 0; row < this._rows; row++) {
+            const lineIdx = viewStart + row;
+            const line = (lineIdx < totalLines ? allLines[lineIdx] : '') || '';
+            // Use dimmer color when viewing scrollback
+            const gr = this._scrollOffset > 0 ? 0xaa : 0xff;
+            for (let col = 0; col < line.length && col < this._cols; col++) {
+                this._renderChar(pixels, w, col, row, line.charCodeAt(col), 0x00, gr, 0x00);
+            }
+        }
+
+        // Scrollback indicator
+        if (this._scrollOffset > 0) {
+            const indicator = `[scrollback: -${this._scrollOffset} lines]`;
+            for (let col = 0; col < indicator.length && col < this._cols; col++) {
+                this._renderChar(pixels, w, col, 0, indicator.charCodeAt(col), 0xff, 0xff, 0x00); // yellow
+            }
+        }
+
+        // Cursor block (only when at bottom / live view)
+        if (this._booted && this._scrollOffset === 0) {
+            const cy = this._cursorY;
+            const cx = this._cursorX;
+            if (cx < this._cols && cy < this._rows) {
+                this._renderBlock(pixels, w, cx, cy, 0x00, 0xff, 0x00);
+            }
+        }
+
+        // Build RFB message: type(1) + padding(1) + numRects(2) + rect header(12) + pixels
+        const rectBytes = w * h * 4;
+        const msgLen = 4 + 12 + rectBytes;
+        const msg = new ArrayBuffer(msgLen);
+        const dv = new DataView(msg);
+        dv.setUint8(0, 0);    // FramebufferUpdate
+        dv.setUint8(1, 0);    // padding
+        dv.setUint16(2, 1);   // 1 rectangle
+        // Rectangle: x, y, w, h, encoding(raw=0)
+        dv.setUint16(4, 0);   // x
+        dv.setUint16(6, 0);   // y
+        dv.setUint16(8, w);   // width
+        dv.setUint16(10, h);  // height
+        dv.setInt32(12, 0);   // encoding = raw
+        new Uint8Array(msg).set(pixels, 16);
+        this._deliverMessage(msg);
+    }
+
+    _renderChar(pixels, stride, col, row, charCode, r, g, b) {
+        // Simple bitmap font: 8x16 monospace, render a basic glyph
+        const glyph = this._getGlyph(charCode);
+        const x0 = col * this._charW;
+        const y0 = row * this._charH;
+        for (let dy = 0; dy < 16; dy++) {
+            const bits = glyph[dy] || 0;
+            for (let dx = 0; dx < 8; dx++) {
+                if (bits & (0x80 >> dx)) {
+                    const idx = ((y0 + dy) * stride + (x0 + dx)) * 4;
+                    pixels[idx] = r;
+                    pixels[idx + 1] = g;
+                    pixels[idx + 2] = b;
+                    pixels[idx + 3] = 255;
+                }
+            }
+        }
+    }
+
+    _renderBlock(pixels, stride, col, row, r, g, b) {
+        const x0 = col * this._charW;
+        const y0 = row * this._charH;
+        for (let dy = 0; dy < this._charH; dy++) {
+            for (let dx = 0; dx < this._charW; dx++) {
+                const idx = ((y0 + dy) * stride + (x0 + dx)) * 4;
+                pixels[idx] = r;
+                pixels[idx + 1] = g;
+                pixels[idx + 2] = b;
+                pixels[idx + 3] = 255;
+            }
+        }
+    }
+
+    _getGlyph(code) {
+        // Minimal bitmap font for ASCII 0x20-0x7E
+        // Using a compact 8x16 representation
+        if (code < 0x20 || code > 0x7e) return _cephaTtyFont[0x20] || new Array(16).fill(0);
+        return _cephaTtyFont[code] || _cephaTtyFont[0x3f] || new Array(16).fill(0); // fallback to '?'
+    }
+
+    _delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    close() {
+        if (this._closed) return;
+        this._closed = true;
+        this.readyState = 3; // CLOSED
+        this._emit('close', { code: 1000, reason: '', wasClean: true });
+    }
+}
+
+// ─── Compact 8×16 Bitmap Font (ASCII 0x20–0x7E) ─────────────
+// Each character is 16 rows of 8-bit bitmasks.
+// Generated from standard VGA/CP437 font metrics.
+
+const _cephaTtyFont = {
+    0x20: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], // space
+    0x21: [0,0,0x18,0x3c,0x3c,0x3c,0x18,0x18,0x18,0,0x18,0x18,0,0,0,0], // !
+    0x22: [0,0x66,0x66,0x66,0x24,0,0,0,0,0,0,0,0,0,0,0], // "
+    0x23: [0,0,0,0x6c,0x6c,0xfe,0x6c,0x6c,0xfe,0x6c,0x6c,0,0,0,0,0], // #
+    0x24: [0,0x18,0x18,0x7c,0xc6,0xc0,0x7c,0x06,0xc6,0x7c,0x18,0x18,0,0,0,0], // $
+    0x25: [0,0,0,0,0xc2,0xc6,0x0c,0x18,0x30,0x66,0xc6,0x86,0,0,0,0], // %
+    0x26: [0,0,0x38,0x6c,0x6c,0x38,0x76,0xdc,0xcc,0xcc,0x76,0,0,0,0,0], // &
+    0x27: [0,0x30,0x30,0x30,0x60,0,0,0,0,0,0,0,0,0,0,0], // '
+    0x28: [0,0,0x0c,0x18,0x30,0x30,0x30,0x30,0x30,0x18,0x0c,0,0,0,0,0], // (
+    0x29: [0,0,0x30,0x18,0x0c,0x0c,0x0c,0x0c,0x0c,0x18,0x30,0,0,0,0,0], // )
+    0x2a: [0,0,0,0,0x66,0x3c,0xff,0x3c,0x66,0,0,0,0,0,0,0], // *
+    0x2b: [0,0,0,0,0x18,0x18,0x7e,0x18,0x18,0,0,0,0,0,0,0], // +
+    0x2c: [0,0,0,0,0,0,0,0,0,0x18,0x18,0x18,0x30,0,0,0], // ,
+    0x2d: [0,0,0,0,0,0,0xfe,0,0,0,0,0,0,0,0,0], // -
+    0x2e: [0,0,0,0,0,0,0,0,0,0,0x18,0x18,0,0,0,0], // .
+    0x2f: [0,0,0,0x02,0x06,0x0c,0x18,0x30,0x60,0xc0,0x80,0,0,0,0,0], // /
+    0x30: [0,0,0x7c,0xc6,0xce,0xde,0xf6,0xe6,0xc6,0xc6,0x7c,0,0,0,0,0], // 0
+    0x31: [0,0,0x18,0x38,0x78,0x18,0x18,0x18,0x18,0x18,0x7e,0,0,0,0,0], // 1
+    0x32: [0,0,0x7c,0xc6,0x06,0x0c,0x18,0x30,0x60,0xc6,0xfe,0,0,0,0,0], // 2
+    0x33: [0,0,0x7c,0xc6,0x06,0x06,0x3c,0x06,0x06,0xc6,0x7c,0,0,0,0,0], // 3
+    0x34: [0,0,0x0c,0x1c,0x3c,0x6c,0xcc,0xfe,0x0c,0x0c,0x1e,0,0,0,0,0], // 4
+    0x35: [0,0,0xfe,0xc0,0xc0,0xfc,0x06,0x06,0x06,0xc6,0x7c,0,0,0,0,0], // 5
+    0x36: [0,0,0x38,0x60,0xc0,0xc0,0xfc,0xc6,0xc6,0xc6,0x7c,0,0,0,0,0], // 6
+    0x37: [0,0,0xfe,0xc6,0x06,0x0c,0x18,0x30,0x30,0x30,0x30,0,0,0,0,0], // 7
+    0x38: [0,0,0x7c,0xc6,0xc6,0xc6,0x7c,0xc6,0xc6,0xc6,0x7c,0,0,0,0,0], // 8
+    0x39: [0,0,0x7c,0xc6,0xc6,0xc6,0x7e,0x06,0x06,0x0c,0x78,0,0,0,0,0], // 9
+    0x3a: [0,0,0,0,0x18,0x18,0,0,0,0x18,0x18,0,0,0,0,0], // :
+    0x3b: [0,0,0,0,0x18,0x18,0,0,0,0x18,0x18,0x30,0,0,0,0], // ;
+    0x3c: [0,0,0,0x06,0x0c,0x18,0x30,0x60,0x30,0x18,0x0c,0x06,0,0,0,0], // <
+    0x3d: [0,0,0,0,0,0x7e,0,0,0x7e,0,0,0,0,0,0,0], // =
+    0x3e: [0,0,0,0x60,0x30,0x18,0x0c,0x06,0x0c,0x18,0x30,0x60,0,0,0,0], // >
+    0x3f: [0,0,0x7c,0xc6,0xc6,0x0c,0x18,0x18,0x18,0,0x18,0x18,0,0,0,0], // ?
+    0x40: [0,0,0,0x7c,0xc6,0xc6,0xde,0xde,0xde,0xdc,0xc0,0x7c,0,0,0,0], // @
+    0x41: [0,0,0x10,0x38,0x6c,0xc6,0xc6,0xfe,0xc6,0xc6,0xc6,0,0,0,0,0], // A
+    0x42: [0,0,0xfc,0x66,0x66,0x66,0x7c,0x66,0x66,0x66,0xfc,0,0,0,0,0], // B
+    0x43: [0,0,0x3c,0x66,0xc2,0xc0,0xc0,0xc0,0xc2,0x66,0x3c,0,0,0,0,0], // C
+    0x44: [0,0,0xf8,0x6c,0x66,0x66,0x66,0x66,0x66,0x6c,0xf8,0,0,0,0,0], // D
+    0x45: [0,0,0xfe,0x66,0x62,0x68,0x78,0x68,0x62,0x66,0xfe,0,0,0,0,0], // E
+    0x46: [0,0,0xfe,0x66,0x62,0x68,0x78,0x68,0x60,0x60,0xf0,0,0,0,0,0], // F
+    0x47: [0,0,0x3c,0x66,0xc2,0xc0,0xc0,0xde,0xc6,0x66,0x3a,0,0,0,0,0], // G
+    0x48: [0,0,0xc6,0xc6,0xc6,0xc6,0xfe,0xc6,0xc6,0xc6,0xc6,0,0,0,0,0], // H
+    0x49: [0,0,0x3c,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x3c,0,0,0,0,0], // I
+    0x4a: [0,0,0x1e,0x0c,0x0c,0x0c,0x0c,0x0c,0xcc,0xcc,0x78,0,0,0,0,0], // J
+    0x4b: [0,0,0xe6,0x66,0x6c,0x6c,0x78,0x6c,0x6c,0x66,0xe6,0,0,0,0,0], // K
+    0x4c: [0,0,0xf0,0x60,0x60,0x60,0x60,0x60,0x62,0x66,0xfe,0,0,0,0,0], // L
+    0x4d: [0,0,0xc6,0xee,0xfe,0xfe,0xd6,0xc6,0xc6,0xc6,0xc6,0,0,0,0,0], // M
+    0x4e: [0,0,0xc6,0xe6,0xf6,0xfe,0xde,0xce,0xc6,0xc6,0xc6,0,0,0,0,0], // N
+    0x4f: [0,0,0x7c,0xc6,0xc6,0xc6,0xc6,0xc6,0xc6,0xc6,0x7c,0,0,0,0,0], // O
+    0x50: [0,0,0xfc,0x66,0x66,0x66,0x7c,0x60,0x60,0x60,0xf0,0,0,0,0,0], // P
+    0x51: [0,0,0x7c,0xc6,0xc6,0xc6,0xc6,0xd6,0xde,0x7c,0x0c,0x0e,0,0,0,0], // Q
+    0x52: [0,0,0xfc,0x66,0x66,0x66,0x7c,0x6c,0x66,0x66,0xe6,0,0,0,0,0], // R
+    0x53: [0,0,0x7c,0xc6,0xc6,0x60,0x38,0x0c,0xc6,0xc6,0x7c,0,0,0,0,0], // S
+    0x54: [0,0,0x7e,0x7e,0x5a,0x18,0x18,0x18,0x18,0x18,0x3c,0,0,0,0,0], // T
+    0x55: [0,0,0xc6,0xc6,0xc6,0xc6,0xc6,0xc6,0xc6,0xc6,0x7c,0,0,0,0,0], // U
+    0x56: [0,0,0xc6,0xc6,0xc6,0xc6,0xc6,0xc6,0x6c,0x38,0x10,0,0,0,0,0], // V
+    0x57: [0,0,0xc6,0xc6,0xc6,0xc6,0xd6,0xd6,0xfe,0x6c,0x6c,0,0,0,0,0], // W
+    0x58: [0,0,0xc6,0xc6,0x6c,0x38,0x38,0x38,0x6c,0xc6,0xc6,0,0,0,0,0], // X
+    0x59: [0,0,0x66,0x66,0x66,0x66,0x3c,0x18,0x18,0x18,0x3c,0,0,0,0,0], // Y
+    0x5a: [0,0,0xfe,0xc6,0x86,0x0c,0x18,0x30,0x62,0xc6,0xfe,0,0,0,0,0], // Z
+    0x5b: [0,0,0x3c,0x30,0x30,0x30,0x30,0x30,0x30,0x30,0x3c,0,0,0,0,0], // [
+    0x5c: [0,0,0,0x80,0xc0,0x60,0x30,0x18,0x0c,0x06,0x02,0,0,0,0,0], // backslash
+    0x5d: [0,0,0x3c,0x0c,0x0c,0x0c,0x0c,0x0c,0x0c,0x0c,0x3c,0,0,0,0,0], // ]
+    0x5e: [0x10,0x38,0x6c,0xc6,0,0,0,0,0,0,0,0,0,0,0,0], // ^
+    0x5f: [0,0,0,0,0,0,0,0,0,0,0,0,0xff,0,0,0], // _
+    0x60: [0,0x30,0x30,0x18,0,0,0,0,0,0,0,0,0,0,0,0], // `
+    0x61: [0,0,0,0,0,0x78,0x0c,0x7c,0xcc,0xcc,0x76,0,0,0,0,0], // a
+    0x62: [0,0,0xe0,0x60,0x60,0x78,0x6c,0x66,0x66,0x66,0x7c,0,0,0,0,0], // b
+    0x63: [0,0,0,0,0,0x7c,0xc6,0xc0,0xc0,0xc6,0x7c,0,0,0,0,0], // c
+    0x64: [0,0,0x1c,0x0c,0x0c,0x3c,0x6c,0xcc,0xcc,0xcc,0x76,0,0,0,0,0], // d
+    0x65: [0,0,0,0,0,0x7c,0xc6,0xfe,0xc0,0xc6,0x7c,0,0,0,0,0], // e
+    0x66: [0,0,0x38,0x6c,0x64,0x60,0xf0,0x60,0x60,0x60,0xf0,0,0,0,0,0], // f
+    0x67: [0,0,0,0,0,0x76,0xcc,0xcc,0xcc,0x7c,0x0c,0xcc,0x78,0,0,0], // g
+    0x68: [0,0,0xe0,0x60,0x60,0x6c,0x76,0x66,0x66,0x66,0xe6,0,0,0,0,0], // h
+    0x69: [0,0,0x18,0x18,0,0x38,0x18,0x18,0x18,0x18,0x3c,0,0,0,0,0], // i
+    0x6a: [0,0,0x06,0x06,0,0x0e,0x06,0x06,0x06,0x06,0x66,0x66,0x3c,0,0,0], // j
+    0x6b: [0,0,0xe0,0x60,0x60,0x66,0x6c,0x78,0x6c,0x66,0xe6,0,0,0,0,0], // k
+    0x6c: [0,0,0x38,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x3c,0,0,0,0,0], // l
+    0x6d: [0,0,0,0,0,0xec,0xfe,0xd6,0xd6,0xd6,0xc6,0,0,0,0,0], // m
+    0x6e: [0,0,0,0,0,0xdc,0x66,0x66,0x66,0x66,0x66,0,0,0,0,0], // n
+    0x6f: [0,0,0,0,0,0x7c,0xc6,0xc6,0xc6,0xc6,0x7c,0,0,0,0,0], // o
+    0x70: [0,0,0,0,0,0xdc,0x66,0x66,0x66,0x7c,0x60,0x60,0xf0,0,0,0], // p
+    0x71: [0,0,0,0,0,0x76,0xcc,0xcc,0xcc,0x7c,0x0c,0x0c,0x1e,0,0,0], // q
+    0x72: [0,0,0,0,0,0xdc,0x76,0x66,0x60,0x60,0xf0,0,0,0,0,0], // r
+    0x73: [0,0,0,0,0,0x7c,0xc6,0x70,0x1c,0xc6,0x7c,0,0,0,0,0], // s
+    0x74: [0,0,0x10,0x30,0x30,0xfc,0x30,0x30,0x30,0x36,0x1c,0,0,0,0,0], // t
+    0x75: [0,0,0,0,0,0xcc,0xcc,0xcc,0xcc,0xcc,0x76,0,0,0,0,0], // u
+    0x76: [0,0,0,0,0,0x66,0x66,0x66,0x66,0x3c,0x18,0,0,0,0,0], // v
+    0x77: [0,0,0,0,0,0xc6,0xc6,0xd6,0xd6,0xfe,0x6c,0,0,0,0,0], // w
+    0x78: [0,0,0,0,0,0xc6,0x6c,0x38,0x38,0x6c,0xc6,0,0,0,0,0], // x
+    0x79: [0,0,0,0,0,0xc6,0xc6,0xc6,0xc6,0x7e,0x06,0x0c,0xf8,0,0,0], // y
+    0x7a: [0,0,0,0,0,0xfe,0xcc,0x18,0x30,0x66,0xfe,0,0,0,0,0], // z
+    0x7b: [0,0,0x0e,0x18,0x18,0x18,0x70,0x18,0x18,0x18,0x0e,0,0,0,0,0], // {
+    0x7c: [0,0,0x18,0x18,0x18,0x18,0,0x18,0x18,0x18,0x18,0,0,0,0,0], // |
+    0x7d: [0,0,0x70,0x18,0x18,0x18,0x0e,0x18,0x18,0x18,0x70,0,0,0,0,0], // }
+    0x7e: [0,0,0x76,0xdc,0,0,0,0,0,0,0,0,0,0,0,0], // ~
+};
 
 // ─── Service Worker Registration ─────────────────────────────
 // Only register if the app provides a service-worker.js (opt-in via global flag)
