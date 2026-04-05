@@ -442,8 +442,16 @@ const _fetchPending = new Map();
 const _originalFetch = window.fetch.bind(window);
 
 window.fetch = function(input, init) {
-    const url = typeof input === 'string' ? input : input?.url || '';
-    // Only intercept same-origin relative paths that look like API/controller routes
+    let url = typeof input === 'string' ? input : input?.url || '';
+    // Normalize absolute localhost URLs to relative paths so they route through WASM
+    // (e.g. HttpClient calling http://localhost:5137/api/... → /api/...)
+    try {
+        const parsed = new URL(url, location.origin);
+        if (parsed.hostname === 'localhost' && parsed.origin !== location.origin) {
+            url = parsed.pathname + parsed.search;
+        }
+    } catch {}
+    // Intercept same-origin relative paths that look like API/controller routes
     if (url.startsWith('/') && !url.startsWith('//') && !/\.\w{2,5}(\?|$)/.test(url)) {
         const method = (init?.method || 'GET').toUpperCase();
         let body = null;
