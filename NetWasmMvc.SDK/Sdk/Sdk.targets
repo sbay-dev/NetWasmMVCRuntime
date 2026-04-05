@@ -320,7 +320,8 @@
     <Compile Include="$(_NwmSdkRoot)shared\WebApplicationShims.cs"  Link="Cepha\WebApplicationShims.cs"  Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\NetContainerShims.cs"    Link="Cepha\NetContainerShims.cs"    Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\HostingShims.cs"        Link="Cepha\HostingShims.cs"        Visible="false" />
-    <Compile Include="$(_NwmSdkRoot)shared\MvcShims.cs"          Link="Cepha\MvcShims.cs"          Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\MvcShims.cs"            Link="Cepha\MvcShims.cs"            Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\HttpClientShims.cs"    Link="Cepha\HttpClientShims.cs"    Visible="false" />
   </ItemGroup>
 
   <!-- ═══ SQLite Native for WASM══════════════════════════════ -->

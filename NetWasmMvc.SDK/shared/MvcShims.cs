@@ -88,9 +88,14 @@ namespace Microsoft.AspNetCore.Mvc
     // HTTP helpers — Controller.Response / Controller.Request
     // ═══════════════════════════════════════════════════════════
 
-    /// <summary>String-keyed header dictionary matching ASP.NET Core IHeaderDictionary surface.</summary>
+    /// <summary>
+    /// Case-insensitive header dictionary matching ASP.NET Core IHeaderDictionary surface.
+    /// Uses OrdinalIgnoreCase per RFC 7230 (HTTP/1.1 header field names are case-insensitive).
+    /// </summary>
     public class HeaderDictionary : Dictionary<string, string>
     {
+        public HeaderDictionary() : base(StringComparer.OrdinalIgnoreCase) { }
+
         public string? CacheControl
         {
             get => TryGetValue("Cache-Control", out var v) ? v : null;
@@ -101,6 +106,18 @@ namespace Microsoft.AspNetCore.Mvc
         {
             get => TryGetValue("Connection", out var v) ? v : null;
             set { if (value != null) this["Connection"] = value; else Remove("Connection"); }
+        }
+
+        public long? ContentLength
+        {
+            get => TryGetValue("Content-Length", out var v) && long.TryParse(v, out var n) ? n : null;
+            set { if (value.HasValue) this["Content-Length"] = value.Value.ToString(); else Remove("Content-Length"); }
+        }
+
+        public string? ContentType
+        {
+            get => TryGetValue("Content-Type", out var v) ? v : null;
+            set { if (value != null) this["Content-Type"] = value; else Remove("Content-Type"); }
         }
 
         /// <summary>Appends a value to the header. Multi-value headers are comma-separated.</summary>
@@ -118,16 +135,30 @@ namespace Microsoft.AspNetCore.Mvc
     {
         public int StatusCode { get; set; } = 200;
         public string? ContentType { get; set; }
+        public long? ContentLength { get; set; }
         public HeaderDictionary Headers { get; } = new();
+        public bool HasStarted { get; private set; }
 
         private readonly MemoryStream _body = new();
         public Stream Body => _body;
 
         public async Task WriteAsync(string text, CancellationToken ct = default)
         {
+            HasStarted = true;
             var bytes = System.Text.Encoding.UTF8.GetBytes(text);
             await _body.WriteAsync(bytes, ct);
         }
+
+        public void Redirect(string url) => Redirect(url, permanent: false);
+
+        public void Redirect(string url, bool permanent)
+        {
+            StatusCode = permanent ? 301 : 302;
+            Headers["Location"] = url;
+        }
+
+        public void OnStarting(Func<Task> callback) { /* No pipeline in WASM */ }
+        public void OnCompleted(Func<Task> callback) { /* No pipeline in WASM */ }
     }
 
     /// <summary>Browser-WASM HTTP request with ASP.NET Core API surface.</summary>
@@ -140,6 +171,10 @@ namespace Microsoft.AspNetCore.Mvc
         public string? ContentType { get; set; }
         public long? ContentLength { get; set; }
         public string QueryString { get; set; } = "";
+        public string Scheme { get; set; } = "https";
+        public string Host { get; set; } = "localhost";
+        public string PathBase { get; set; } = "";
+        public bool IsHttps => string.Equals(Scheme, "https", StringComparison.OrdinalIgnoreCase);
     }
 
     // ═══════════════════════════════════════════════════════════
