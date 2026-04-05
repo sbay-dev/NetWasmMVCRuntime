@@ -7,9 +7,6 @@
 const __DEV__ = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]';
 if (__DEV__) console.log('%c🧬 NetWasmMvc.SDK — Display Surface', 'color: #667eea; font-weight: bold');
 
-// Global flag: views can check window.__cephaWasmMode to hide server-only elements
-window.__cephaWasmMode = true;
-
 // ─── CephaLoader: Native Loading System ──────────────────────
 
 const CephaLoader = (() => {
@@ -223,8 +220,6 @@ function applyFrame(frame) {
             el.innerHTML = html;
             // Execute <script> tags — innerHTML doesn't run them natively
             activateScripts(el);
-            // Hide server-only elements in WASM mode
-            el.querySelectorAll('[data-requires="server"]').forEach(e => e.style.display = 'none');
             CephaLoader.hideOverlay();
             CephaLoader.endNav();
             break;
@@ -448,14 +443,6 @@ const _originalFetch = window.fetch.bind(window);
 
 window.fetch = function(input, init) {
     let url = typeof input === 'string' ? input : input?.url || '';
-    // Normalize absolute localhost URLs to relative paths so they route through WASM
-    // (e.g. HttpClient calling http://localhost:5137/api/... → /api/...)
-    try {
-        const parsed = new URL(url, location.origin);
-        if (parsed.hostname === 'localhost' && parsed.origin !== location.origin) {
-            url = parsed.pathname + parsed.search;
-        }
-    } catch {}
     // Intercept same-origin relative paths that look like API/controller routes
     if (url.startsWith('/') && !url.startsWith('//') && !/\.\w{2,5}(\?|$)/.test(url)) {
         const method = (init?.method || 'GET').toUpperCase();

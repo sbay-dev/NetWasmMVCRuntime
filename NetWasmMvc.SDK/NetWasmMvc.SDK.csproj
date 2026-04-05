@@ -10,7 +10,7 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <PackageId>NetWasmMvc.SDK</PackageId>
-    <Version>1.0.66</Version>
+    <Version>1.0.67</Version>
     <Authors>sbay-dev</Authors>
     <Company>sbay</Company>
     <Description>NetWasmMvc SDK — Complete ASP.NET MVC runtime for WebAssembly. Controllers, Views, SignalR, EF Core SQLite, Identity — all bundled. Write MVC apps that run entirely in the browser. Powered by Cepha (Physarum polycephalum).</Description>

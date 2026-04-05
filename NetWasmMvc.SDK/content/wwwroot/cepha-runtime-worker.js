@@ -206,32 +206,5 @@ self.onmessage = async (e) => {
 
 self.postMessage({ type: 'runtime-ready' });
 
-// ─── Worker fetch intercept: route cross-origin localhost API calls ──
-// .NET HttpClient in WASM uses the worker's self.fetch(), which bypasses
-// the main thread's window.fetch override. Intercept here to route
-// localhost API calls through the MVC engine instead of causing CORS errors.
-const _workerFetch = self.fetch.bind(self);
-self.fetch = async function(input, init) {
-    let url = typeof input === 'string' ? input : input?.url || '';
-    try {
-        const u = new URL(url, self.location.origin);
-        if (u.hostname === 'localhost' && u.origin !== self.location.origin && _exports) {
-            const method = (init?.method || 'GET').toUpperCase();
-            const path = u.pathname + u.search;
-            let body = null;
-            if (init?.body) {
-                body = typeof init.body === 'string' ? init.body : await new Response(init.body).text();
-            }
-            const responseJson = await _exports.Cepha.JsExports.HandleRequest(method, path, null, body);
-            const parsed = JSON.parse(responseJson);
-            return new Response(parsed.body || '', {
-                status: parsed.statusCode || 200,
-                headers: { 'Content-Type': parsed.contentType || 'application/json' }
-            });
-        }
-    } catch (e) { /* fall through to original fetch */ }
-    return _workerFetch(input, init);
-};
-
 // Boot the .NET app (Program.Main → CephaApp.RunAsync)
 runMain().catch(err => console.error('🧬 runMain failed:', err));
