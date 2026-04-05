@@ -241,11 +241,11 @@ namespace NetContainer.Ref
         public int? QemuPid => null;
         public bool IsRunning { get; private set; }
         public DateTimeOffset? StartedAt { get; }
-        public int QmpPort => 0;
-        public int VncPort => 0;
-        public int VncWsPort => 0;
-        public int SshPort => 0;
-        public int HttpPort => 0;
+        public int QmpPort => 4444;
+        public int VncPort => 5900;
+        public int VncWsPort => 5700;
+        public int SshPort => 22;
+        public int HttpPort => 80;
         public int SerialPort => 9600;
         public string SessionDir { get; }
         public IShellService Shell { get; }
