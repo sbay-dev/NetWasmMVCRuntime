@@ -157,7 +157,7 @@ namespace NetContainer.Ref
             {
                 new DistributionProfile
                 {
-                    Name = "OpenWrt (browser stub)",
+                    Name = "OpenWrt (browser-wasm, no QEMU)",
                     Distribution = KnownDistribution.OpenWrt,
                     Arch = "x86_64",
                     BootMethod = DistributionBootMethod.DiskImage,
