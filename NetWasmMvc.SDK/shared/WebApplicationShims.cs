@@ -1,11 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using Cepha;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-#if HAS_NETCONTAINER_REF
-using NetContainer.Ref;
-#endif
 
 namespace Microsoft.AspNetCore.Builder
 {
@@ -25,11 +24,6 @@ namespace Microsoft.AspNetCore.Builder
             this.AddSingleton(typeof(THostedService));
             return this;
         }
-
-#if HAS_NETCONTAINER_REF
-        public CephaServiceCollection AddNetContainerRef(Action<RefOptions>? configure = null)
-            => NetContainer.Ref.BrowserRefServiceRegistration.AddNetContainerRef(this, configure);
-#endif
     }
 
     /// <summary>
@@ -53,9 +47,10 @@ namespace Microsoft.AspNetCore.Builder
     /// <summary>
     /// Browser-wasm WebApplication shim that routes startup to CephaApp.
     /// </summary>
-    public sealed class WebApplication
+    public sealed class WebApplication : IEndpointRouteBuilder
     {
         private readonly CephaServiceCollection _services;
+        private readonly List<EndpointDataSource> _dataSources = new();
         private CephaApplication? _app;
         private bool _started;
 
@@ -63,6 +58,13 @@ namespace Microsoft.AspNetCore.Builder
         {
             _services = services;
         }
+
+        // IEndpointRouteBuilder — enables extension methods from any NuGet package
+        IServiceProvider IEndpointRouteBuilder.ServiceProvider =>
+            _app?.Services ?? _services.BuildServiceProvider();
+        ICollection<EndpointDataSource> IEndpointRouteBuilder.DataSources => _dataSources;
+        IApplicationBuilder IEndpointRouteBuilder.CreateApplicationBuilder() =>
+            throw new NotSupportedException("HTTP pipeline not available in browser-WASM");
 
         public static WebApplicationBuilder CreateBuilder(string[]? args = null) => new();
 
@@ -81,12 +83,6 @@ namespace Microsoft.AspNetCore.Builder
         /// </summary>
         public WebApplication Use(Func<Microsoft.AspNetCore.Http.HttpContext, Func<Task>, Task> middleware) => this;
 
-        public CephaEndpointConventionBuilder MapNetContainerTerminal(string pattern = "/nc-terminal/{guestId}")
-            => new();
-
-        public CephaEndpointConventionBuilder MapNetContainerVnc(string pattern = "/nc-vnc/{guestId}")
-            => new();
-
         public void Run()
         {
             if (_started)
@@ -103,7 +99,7 @@ namespace Microsoft.AspNetCore.Builder
                 }
             });
 
-            // Start registered hosted services (e.g., GuestBootService)
+            // Start registered hosted services
             foreach (var type in _services.HostedServiceTypes)
             {
                 try

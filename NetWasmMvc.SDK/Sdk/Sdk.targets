@@ -299,17 +299,6 @@
 
   <!-- ═══ Shared Source Files (compiled into consumer project) ═ -->
 
-  <!-- Detect NetContainer.Ref in consumer's PackageReference and define HAS_NETCONTAINER_REF -->
-  <Target Name="_DetectNetContainerRef" BeforeTargets="CoreCompile">
-    <PropertyGroup>
-      <_NcRefList>;@(PackageReference);</_NcRefList>
-      <_HasNcRef>$(_NcRefList.Contains(';NetContainer.Ref;'))</_HasNcRef>
-    </PropertyGroup>
-    <PropertyGroup Condition="'$(_HasNcRef)' == 'True'">
-      <DefineConstants>$(DefineConstants);HAS_NETCONTAINER_REF</DefineConstants>
-    </PropertyGroup>
-  </Target>
-
   <ItemGroup>
     <Compile Include="$(_NwmSdkRoot)shared\JsInterop.cs"            Link="Cepha\JsInterop.cs"            Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\JsExports.cs"            Link="Cepha\JsExports.cs"            Visible="false" />
@@ -318,7 +307,6 @@
     <Compile Include="$(_NwmSdkRoot)shared\SqliteNativeResolver.cs" Link="Cepha\SqliteNativeResolver.cs" Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\StaticAssetsShims.cs"    Link="Cepha\StaticAssetsShims.cs"    Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\WebApplicationShims.cs"  Link="Cepha\WebApplicationShims.cs"  Visible="false" />
-    <Compile Include="$(_NwmSdkRoot)shared\NetContainerShims.cs"    Link="Cepha\NetContainerShims.cs"    Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\HostingShims.cs"        Link="Cepha\HostingShims.cs"        Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\MvcShims.cs"            Link="Cepha\MvcShims.cs"            Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\HttpClientShims.cs"    Link="Cepha\HttpClientShims.cs"    Visible="false" />
