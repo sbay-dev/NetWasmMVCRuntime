@@ -7,6 +7,9 @@
 const __DEV__ = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]';
 if (__DEV__) console.log('%c🧬 NetWasmMvc.SDK — Display Surface', 'color: #667eea; font-weight: bold');
 
+// Global flag: views can check window.__cephaWasmMode to hide server-only elements
+window.__cephaWasmMode = true;
+
 // ─── CephaLoader: Native Loading System ──────────────────────
 
 const CephaLoader = (() => {
@@ -220,6 +223,8 @@ function applyFrame(frame) {
             el.innerHTML = html;
             // Execute <script> tags — innerHTML doesn't run them natively
             activateScripts(el);
+            // Hide server-only elements in WASM mode
+            el.querySelectorAll('[data-requires="server"]').forEach(e => e.style.display = 'none');
             CephaLoader.hideOverlay();
             CephaLoader.endNav();
             break;
