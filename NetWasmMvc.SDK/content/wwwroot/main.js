@@ -133,28 +133,40 @@ for (let i = 0; i < localStorage.length; i++) {
 }
 worker.postMessage({ type: 'init', path: location.pathname || '/', storage: storageSnapshot, fingerprint: navigator.userAgent });
 
+// ─── Original fetch reference (before any intercepts) ────────
+const _originalFetch = window.fetch.bind(window);
+
 // ─── CephaKit Client (runs on main thread — needs fetch + DOM) ──
 
 window.CephaClient = {
     serverUrl: null,
     connected: false,
     async discover(urls) {
+        const origin = location.origin;
         const candidates = urls || [
+            origin,
+            `${location.protocol}//${location.hostname}:5137`,
             `${location.protocol}//${location.hostname}:3000`,
+            'http://localhost:5137',
             'http://localhost:3000'
         ];
-        for (const url of candidates) {
+        // Deduplicate
+        const unique = [...new Set(candidates)];
+        for (const url of unique) {
             try {
-                const res = await fetch(`${url}/_cepha/info`, { signal: AbortSignal.timeout(2000) });
+                const res = await _originalFetch(`${url}/_cepha/info`, {
+                    signal: AbortSignal.timeout(2000),
+                    mode: url === origin ? 'same-origin' : 'cors'
+                });
                 if (res.ok) {
                     this.serverUrl = url;
                     this.connected = true;
-                    if (__DEV__) console.log(`%c🧬 Cepha server: ${url}`, 'color: #28a745; font-weight: bold');
+                    if (__DEV__) console.log(`%c🧬 CephaKit server: ${url}`, 'color: #28a745; font-weight: bold');
                     return await res.json();
                 }
             } catch { /* next */ }
         }
-        if (__DEV__) console.log('%c🧬 Cepha: offline mode (Worker-only)', 'color: #ffc107');
+        if (__DEV__) console.log('%c🧬 CephaKit: offline (Worker-only mode)', 'color: #ffc107');
         return null;
     },
     async fetch(method, path, body) {
@@ -162,9 +174,12 @@ window.CephaClient = {
         const opts = { method, headers: { 'Content-Type': 'application/json' } };
         if (body && ['POST', 'PUT', 'PATCH'].includes(method))
             opts.body = typeof body === 'string' ? body : JSON.stringify(body);
-        return await (await fetch(`${this.serverUrl}${path}`, opts)).json();
+        return await (await _originalFetch(`${this.serverUrl}${path}`, opts)).json();
     }
 };
+
+// Auto-discover CephaKit server at startup (non-blocking)
+window.CephaClient.discover();
 
 // ─── Cross-Tab Auth Sync (BroadcastChannel) ─────────────────
 
@@ -435,11 +450,10 @@ worker.onmessage = (e) => {
     }
 };
 
-// ─── Fetch Intercept: route API calls through worker ─────────
+// ─── Fetch Intercept: route API calls through CephaKit or worker ─
 
 let _fetchMsgId = 0;
 const _fetchPending = new Map();
-const _originalFetch = window.fetch.bind(window);
 
 window.fetch = function(input, init) {
     let url = typeof input === 'string' ? input : input?.url || '';
@@ -450,6 +464,19 @@ window.fetch = function(input, init) {
         if (init?.body) {
             body = typeof init.body === 'string' ? init.body : JSON.stringify(init.body);
         }
+
+        // Prefer CephaKit server when connected (real backend with full I/O)
+        if (window.CephaClient?.connected) {
+            const opts = { method, headers: {} };
+            if (init?.headers) Object.assign(opts.headers, init.headers);
+            if (body && method !== 'GET') {
+                opts.body = body;
+                if (!opts.headers['Content-Type']) opts.headers['Content-Type'] = 'application/json';
+            }
+            return _originalFetch(`${window.CephaClient.serverUrl}${url}`, opts);
+        }
+
+        // Fallback: route through WASM worker
         return new Promise((resolve) => {
             const id = ++_fetchMsgId;
             _fetchPending.set(id, (responseJson) => {
@@ -470,14 +497,21 @@ window.fetch = function(input, init) {
     return _originalFetch(input, init);
 };
 
-// ─── EventSource Intercept: route SSE through worker fetch ───
+// ─── EventSource Intercept: route SSE through CephaKit or worker ─
 // EventSource doesn't use fetch, so the override above won't catch it.
-// For same-origin API paths, we fetch log data through the worker and
-// emit events through a synthetic EventSource — proper abstraction.
+// When CephaKit is connected, use real EventSource to the server.
+// Otherwise, fetch log data through the worker and emit events synthetically.
 
 const _OriginalEventSource = window.EventSource;
 window.EventSource = function(url, opts) {
     if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//') && !/\.\w{2,5}(\?|$)/.test(url)) {
+
+        // Real EventSource through CephaKit server
+        if (window.CephaClient?.connected) {
+            return new _OriginalEventSource(`${window.CephaClient.serverUrl}${url}`, opts);
+        }
+
+        // Synthetic EventSource through worker
         const fake = new EventTarget();
         fake.url = url;
         fake.readyState = 0; // CONNECTING
