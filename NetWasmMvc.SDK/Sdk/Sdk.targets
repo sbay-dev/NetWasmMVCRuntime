@@ -297,6 +297,20 @@
     </Reference>
   </ItemGroup>
 
+  <!-- ═══ Detect NetContainer.Ref & replace with browser shims ═ -->
+  <Target Name="_DetectNetContainerRef" BeforeTargets="ResolvePackageAssets;CollectPackageReferences">
+    <ItemGroup>
+      <_NcRef Include="@(PackageReference)" Condition="'%(Identity)' == 'NetContainer.Ref'" />
+    </ItemGroup>
+    <PropertyGroup Condition="@(_NcRef->Count()) &gt; 0">
+      <DefineConstants>$(DefineConstants);HAS_NETCONTAINER_REF</DefineConstants>
+    </PropertyGroup>
+    <!-- Remove the real package in browser-wasm — our shims replace it -->
+    <ItemGroup Condition="@(_NcRef->Count()) &gt; 0">
+      <PackageReference Remove="NetContainer.Ref" />
+    </ItemGroup>
+  </Target>
+
   <!-- ═══ Shared Source Files (compiled into consumer project) ═ -->
 
   <ItemGroup>
@@ -310,6 +324,7 @@
     <Compile Include="$(_NwmSdkRoot)shared\HostingShims.cs"        Link="Cepha\HostingShims.cs"        Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\MvcShims.cs"            Link="Cepha\MvcShims.cs"            Visible="false" />
     <Compile Include="$(_NwmSdkRoot)shared\HttpClientShims.cs"    Link="Cepha\HttpClientShims.cs"    Visible="false" />
+    <Compile Include="$(_NwmSdkRoot)shared\NetContainerShims.cs"  Link="Cepha\NetContainerShims.cs"  Visible="false" />
   </ItemGroup>
 
   <!-- ═══ SQLite Native for WASM══════════════════════════════ -->
