@@ -144,7 +144,7 @@ namespace NetContainer.Ref.Guest
         public int HttpPort { get; init; }
         public int SerialPort { get; init; }
         public string SessionDir { get; init; } = "/tmp/nc-wasm";
-        public Services.IShellService Shell => new Services.BrowserShellService();
+        public Services.IShellService Shell => new Services.BrowserShellService(Id, SshPort, HttpPort, StartedAt ?? DateTime.UtcNow);
         public Services.IPackageService Packages => new Services.BrowserPackageService();
         public Services.ILogStreamService Logs => new Services.BrowserLogStreamService(_logBuffer);
         public Services.IAnalyticsService Analytics => new Services.BrowserAnalyticsService();
@@ -508,12 +508,269 @@ namespace NetContainer.Ref.Services
 
     internal sealed class BrowserShellService : IShellService
     {
+        private readonly string _guestId;
+        private readonly int _sshPort;
+        private readonly int _httpPort;
+        private readonly DateTime _bootTime;
+        private readonly Dictionary<string, string> _env = new()
+        {
+            ["HOME"] = "/root", ["PATH"] = "/usr/sbin:/usr/bin:/sbin:/bin",
+            ["SHELL"] = "/bin/ash", ["USER"] = "root", ["TERM"] = "xterm-256color",
+            ["HOSTNAME"] = "OpenWrt", ["LOGNAME"] = "root"
+        };
+        private string _cwd = "/root";
+
+        internal BrowserShellService(string guestId, int sshPort, int httpPort, DateTime bootTime)
+        {
+            _guestId = guestId; _sshPort = sshPort;
+            _httpPort = httpPort; _bootTime = bootTime;
+        }
+
         public Task<ShellResult> RunAsync(string command, int timeoutMs = 5000,
             CancellationToken ct = default)
-            => Task.FromResult(new ShellResult { ExitCode = 0, StdOut = $"[wasm] {command}" });
+        {
+            var cmd = (command ?? "").Trim();
+            var output = Interpret(cmd);
+            return Task.FromResult(new ShellResult { ExitCode = 0, StdOut = output });
+        }
+
         public Task<ShellResult> RunRequiredAsync(string command, int timeoutMs = 5000,
             CancellationToken ct = default)
             => RunAsync(command, timeoutMs, ct);
+
+        private string Interpret(string cmd)
+        {
+            // Handle pipes/semicolons (basic)
+            if (cmd.Contains(';'))
+            {
+                var parts = cmd.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                return string.Join("\n", parts.Select(Interpret));
+            }
+
+            // Parse command and args
+            var tokens = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 0) return "";
+            var bin = tokens[0];
+            var args = tokens.Skip(1).ToArray();
+
+            var uptime = (DateTime.UtcNow - _bootTime).TotalSeconds;
+
+            return bin switch
+            {
+                "uname" => args.Contains("-a")
+                    ? $"Linux OpenWrt 6.6.67 #0 SMP Mon Jan 6 12:00:00 2025 x86_64 GNU/Linux"
+                    : args.Contains("-r") ? "6.6.67"
+                    : args.Contains("-m") ? "x86_64"
+                    : args.Contains("-s") ? "Linux"
+                    : "Linux",
+
+                "cat" => InterpretCat(args),
+
+                "echo" => args.Length > 0 && args[0].StartsWith("$")
+                    ? _env.GetValueOrDefault(args[0][1..], "")
+                    : string.Join(" ", args),
+
+                "hostname" => "OpenWrt",
+
+                "whoami" => "root",
+                "id" => "uid=0(root) gid=0(root) groups=0(root)",
+
+                "pwd" => _cwd,
+                "cd" => CdCommand(args),
+
+                "uptime" => $" {DateTime.UtcNow:HH:mm:ss} up {(int)(uptime / 60)} min,  load average: 0.08, 0.03, 0.01",
+
+                "date" => DateTime.UtcNow.ToString("ddd MMM dd HH:mm:ss UTC yyyy"),
+
+                "free" => "              total        used        free      shared  buff/cache   available\n" +
+                          "Mem:        2097152      145408     1876992        2048       74752     1951744\n" +
+                          "Swap:             0           0           0",
+
+                "df" or "df -h" =>
+                    "Filesystem                Size      Used Available Use% Mounted on\n" +
+                    "/dev/root                48.0M     12.4M     33.5M  27% /\n" +
+                    "tmpfs                   512.0M     72.0K    511.9M   0% /tmp\n" +
+                    "tmpfs                   512.0K         0    512.0K   0% /dev\n" +
+                    "/dev/sda1                16.0M      3.2M     12.6M  20% /boot",
+
+                "mount" =>
+                    "/dev/root on / type ext4 (rw,noatime)\n" +
+                    "proc on /proc type proc (rw,nosuid,nodev,noexec,noatime)\n" +
+                    "sysfs on /sys type sysfs (rw,nosuid,nodev,noexec,noatime)\n" +
+                    "tmpfs on /tmp type tmpfs (rw,nosuid,nodev,noatime)\n" +
+                    "devpts on /dev/pts type devpts (rw,nosuid,noexec,mode=600,ptmxmode=000)",
+
+                "ps" => InterpretPs(uptime),
+
+                "top" => $"Mem: {145408}K used, {1951744}K free, {2048}K shrd, {28672}K buff, {46080}K cached\n" +
+                         "CPU:   0% usr   1% sys   0% nic  98% idle   0% io   0% irq   0% sirq\n" +
+                         "Load average: 0.08 0.03 0.01 1/60 1284\n" +
+                         "  PID  PPID USER     STAT   VSZ %VSZ %CPU COMMAND\n" +
+                         "    1     0 root     S     1584   0%   0% /sbin/procd\n" +
+                         "  892     1 root     S     1280   0%   0% /sbin/ubusd\n" +
+                         " 1034     1 root     S     5120   0%   0% /usr/sbin/uhttpd\n" +
+                         " 1089     1 root     S     3072   0%   0% /usr/sbin/dropbear",
+
+                "ifconfig" or "ip addr" or "ip a" => InterpretIfconfig(),
+
+                "ip" => args.FirstOrDefault() switch
+                {
+                    "addr" or "a" => InterpretIfconfig(),
+                    "route" or "r" => "default via 10.0.2.2 dev eth0\n10.0.2.0/24 dev eth0 scope link  src 10.0.2.15\n192.168.1.0/24 dev br-lan scope link  src 192.168.1.1",
+                    "link" or "l" => "1: lo: <LOOPBACK,UP> mtu 65536 qdisc noqueue state UP\n2: eth0: <BROADCAST,MULTICAST,UP> mtu 1500 qdisc fq_codel state UP\n3: br-lan: <BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state UP",
+                    _ => $"Usage: ip [ addr | route | link ]"
+                },
+
+                "route" =>
+                    "Kernel IP routing table\n" +
+                    "Destination     Gateway         Genmask         Flags Metric Ref    Use Iface\n" +
+                    "default         10.0.2.2        0.0.0.0         UG    0      0        0 eth0\n" +
+                    "10.0.2.0        *               255.255.255.0   U     0      0        0 eth0\n" +
+                    "192.168.1.0     *               255.255.255.0   U     0      0        0 br-lan",
+
+                "netstat" =>
+                    "Active Internet connections (servers and established)\n" +
+                    "Proto Recv-Q Send-Q Local Address           Foreign Address         State\n" +
+                    $"tcp        0      0 0.0.0.0:{_httpPort}            0.0.0.0:*               LISTEN\n" +
+                    $"tcp        0      0 0.0.0.0:{_sshPort}             0.0.0.0:*               LISTEN\n" +
+                    "tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN",
+
+                "ls" => InterpretLs(args),
+
+                "dmesg" =>
+                    "[    0.000000] Linux version 6.6.67\n" +
+                    "[    0.100000] Calibrating delay loop... 4800.00 BogoMIPS\n" +
+                    "[    0.400000] e1000: Intel(R) PRO/1000 Network Driver\n" +
+                    "[    0.700000] init: Console is alive\n" +
+                    "[    1.200000] procd: - init -\n" +
+                    "[    3.000000] procd: - init complete -",
+
+                "uci" => args.FirstOrDefault() switch
+                {
+                    "show" => "system.@system[0]=system\nsystem.@system[0].hostname='OpenWrt'\nsystem.@system[0].timezone='UTC'\nnetwork.loopback=interface\nnetwork.loopback.device='lo'\nnetwork.loopback.proto='static'",
+                    "get" when args.Length > 1 => args[1] switch
+                    {
+                        "system.@system[0].hostname" => "OpenWrt",
+                        _ => ""
+                    },
+                    _ => "Usage: uci [show|get|set|commit]"
+                },
+
+                "opkg" => args.FirstOrDefault() switch
+                {
+                    "list-installed" => "base-files - 1563-r27925\nbusybox - 1.36.1-1\ndnsmasq - 2.90-1\ndropbear - 2024.85-1\nfirewall4 - 2024.02-1\nluci - git-24.086\nuhttpd - 2024.01-1",
+                    "info" => "Package: opkg\nVersion: 2024.01\nStatus: install ok installed",
+                    _ => "Usage: opkg [list-installed|info|install|remove|update]"
+                },
+
+                "env" => string.Join("\n", _env.Select(kv => $"{kv.Key}={kv.Value}")),
+
+                "export" when args.Length > 0 && args[0].Contains('=') =>
+                    ExportCommand(args[0]),
+
+                "help" => "Built-in commands: cat, cd, date, df, dmesg, echo, env, free, hostname, id, ifconfig,\n" +
+                          "  ip, ls, mount, netstat, opkg, ps, pwd, route, top, uci, uname, uptime, whoami",
+
+                _ => cmd.StartsWith("#") ? "" : $"-ash: {bin}: not found"
+            };
+        }
+
+        private string CdCommand(string[] args)
+        {
+            _cwd = args.Length > 0 ? args[0] : "/root";
+            return "";
+        }
+
+        private string ExportCommand(string expr)
+        {
+            var kv = expr.Split('=', 2);
+            _env[kv[0]] = kv.Length > 1 ? kv[1] : "";
+            return "";
+        }
+
+        private string InterpretCat(string[] args)
+        {
+            if (args.Length == 0) return "";
+            return args[0] switch
+            {
+                "/etc/os-release" or "/etc/openwrt_release" =>
+                    "DISTRIB_ID='OpenWrt'\n" +
+                    "DISTRIB_RELEASE='23.05.5'\n" +
+                    "DISTRIB_REVISION='r27925-e36b028ab5'\n" +
+                    "DISTRIB_TARGET='x86/64'\n" +
+                    "DISTRIB_ARCH='x86_64'\n" +
+                    "DISTRIB_DESCRIPTION='OpenWrt 23.05.5 r27925-e36b028ab5'\n" +
+                    "DISTRIB_TAINTS=''",
+                "/etc/banner" =>
+                    "  _______                     ________        __\n" +
+                    " |       |.-----.-----.-----.|  |  |  |.----.|  |_\n" +
+                    " |   -   ||  _  |  -__|     ||  |  |  ||   _||   _|\n" +
+                    " |_______||   __|_____|__|__||________||__|  |____|\n" +
+                    "          |__| W I R E L E S S   F R E E D O M\n" +
+                    " -----------------------------------------------------\n" +
+                    " OpenWrt 23.05.5, r27925-e36b028ab5\n" +
+                    " -----------------------------------------------------",
+                "/proc/version" => "Linux version 6.6.67 (builder@buildhost) (gcc 13.3.0) #0 SMP x86_64",
+                "/proc/cpuinfo" =>
+                    "processor\t: 0\nvendor_id\t: GenuineIntel\nmodel name\t: QEMU Virtual CPU version 2.5+\n" +
+                    "cpu MHz\t\t: 2400.000\ncache size\t: 4096 KB\nflags\t\t: fpu vme de pse tsc msr pae mce cx8 apic",
+                "/proc/meminfo" =>
+                    "MemTotal:        2097152 kB\nMemFree:         1876992 kB\nMemAvailable:    1951744 kB\n" +
+                    "Buffers:           28672 kB\nCached:            46080 kB\nSwapTotal:             0 kB",
+                "/proc/uptime" => $"{(DateTime.UtcNow - _bootTime).TotalSeconds:F2} {(DateTime.UtcNow - _bootTime).TotalSeconds * 0.98:F2}",
+                "/etc/config/network" =>
+                    "config interface 'loopback'\n\toption device 'lo'\n\toption proto 'static'\n\toption ipaddr '127.0.0.1'\n\toption netmask '255.0.0.0'\n\n" +
+                    "config interface 'lan'\n\toption device 'br-lan'\n\toption proto 'static'\n\toption ipaddr '192.168.1.1'\n\toption netmask '255.255.255.0'",
+                "/etc/hostname" => "OpenWrt",
+                _ => $"cat: can't open '{args[0]}': No such file or directory"
+            };
+        }
+
+        private string InterpretPs(double uptime)
+        {
+            return "  PID USER       VSZ STAT COMMAND\n" +
+                   "    1 root      1584 S    /sbin/procd\n" +
+                   "  478 root      1168 S    /sbin/ubusd\n" +
+                   "  652 root       892 S    /sbin/logd -S 16\n" +
+                   "  738 root      1356 S    /sbin/netifd\n" +
+                   "  892 root      2872 S    /usr/sbin/odhcpd\n" +
+                   "  934 root      1284 S    /usr/sbin/dnsmasq -C /var/etc/dnsmasq.conf.cfg01411c\n" +
+                   " 1034 root      5120 S    /usr/sbin/uhttpd -f -h /www -r OpenWrt -x /cgi-bin -t 60 -T 30 -A 1\n" +
+                   " 1089 root      3072 S    /usr/sbin/dropbear -F -P /var/run/dropbear.1.pid -p 22\n" +
+                   " 1156 root      1528 S    /usr/sbin/ntpd -n -N -S /usr/sbin/ntpd-hotplug -p 0.openwrt.pool.ntp.org\n" +
+                   $" 1284 root      1168 R    ash -c ps";
+        }
+
+        private string InterpretIfconfig()
+        {
+            return "br-lan    Link encap:Ethernet  HWaddr 52:54:00:12:34:56\n" +
+                   "          inet addr:192.168.1.1  Bcast:192.168.1.255  Mask:255.255.255.0\n" +
+                   "          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1\n" +
+                   "          RX packets:0 errors:0 dropped:0 overruns:0 frame:0\n" +
+                   "          TX packets:42 errors:0 dropped:0 overruns:0 carrier:0\n\n" +
+                   "eth0      Link encap:Ethernet  HWaddr 52:54:00:12:34:56\n" +
+                   "          inet addr:10.0.2.15  Bcast:10.0.2.255  Mask:255.255.255.0\n" +
+                   "          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1\n" +
+                   "          RX packets:128 errors:0 dropped:0 overruns:0 frame:0\n" +
+                   "          TX packets:96 errors:0 dropped:0 overruns:0 carrier:0\n\n" +
+                   "lo        Link encap:Local Loopback\n" +
+                   "          inet addr:127.0.0.1  Mask:255.0.0.0\n" +
+                   "          UP LOOPBACK RUNNING  MTU:65536  Metric:1";
+        }
+
+        private string InterpretLs(string[] args)
+        {
+            var target = args.LastOrDefault(a => !a.StartsWith("-")) ?? _cwd;
+            return target switch
+            {
+                "/" => "bin      dev      etc      lib      mnt      overlay  proc     rom      run      sbin     sys      tmp      usr      var      www",
+                "/etc" or "etc" => "banner           config           group            hostname         hosts            init.d           inittab          openwrt_release  openwrt_version  os-release       passwd           profile          rc.d             resolv.conf      shadow           shells           sysctl.conf",
+                "/root" or "~" or "." => "",
+                "/tmp" or "tmp" => "dhcp.leases    resolv.conf    run            state          TMP_DIR",
+                "/www" or "www" => "cgi-bin        index.html     luci-static",
+                _ => $"ls: {target}: No such file or directory"
+            };
+        }
     }
 
     internal sealed class BrowserPackageService : IPackageService { }
