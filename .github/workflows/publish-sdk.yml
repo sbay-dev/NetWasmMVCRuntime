@@ -160,7 +160,7 @@ jobs:
         run: |
           # Register local artifact as NuGet source for pre-publish testing
           dotnet nuget add source "$(pwd)/artifacts" --name local-sdk
-          cd Samples/MyCephaApp
+          cd samples/MyCephaApp
           # Update to current version
           sed -i 's|NetWasmMvc.SDK/[0-9.]*|NetWasmMvc.SDK/${{ steps.version.outputs.VERSION }}|' MyCephaApp.csproj
           dotnet restore
