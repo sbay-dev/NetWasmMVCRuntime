@@ -504,7 +504,7 @@ window.fetch = function(input, init) {
 // ─── EventSource Intercept: route SSE through CephaKit or worker ─
 // EventSource doesn't use fetch, so the override above won't catch it.
 // When CephaKit is connected, use real EventSource to the server.
-// Otherwise, fetch log data through the worker and emit events synthetically.
+// Otherwise, poll an equivalent non-streaming endpoint via the worker.
 
 const _OriginalEventSource = window.EventSource;
 window.EventSource = function(url, opts) {
@@ -515,43 +515,60 @@ window.EventSource = function(url, opts) {
             return new _OriginalEventSource(`${window.CephaClient.serverUrl}${url}`, opts);
         }
 
-        // Synthetic EventSource through worker
+        // Synthetic EventSource via polling (SSE streams hang in WASM worker)
         const fake = new EventTarget();
         fake.url = url;
         fake.readyState = 0; // CONNECTING
-        fake.close = () => { fake.readyState = 2; };
         fake.onopen = null;
         fake.onmessage = null;
         fake.onerror = null;
+        let _pollTimer = null;
 
-        // Fetch log data through worker, then emit as SSE events
-        (async () => {
+        fake.close = () => {
+            fake.readyState = 2;
+            if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+        };
+
+        // Convert /stream SSE URL to non-streaming batch URL
+        const batchUrl = url.replace(/\/stream(\?|$)/, '$1');
+        let offset = 0;
+
+        const doPoll = async () => {
+            if (fake.readyState === 2) return;
             try {
                 const id = ++_fetchMsgId;
+                const sep = batchUrl.includes('?') ? '&' : '?';
+                const pollUrl = `${batchUrl}${sep}offset=${offset}`;
                 const responseJson = await new Promise(resolve => {
                     _fetchPending.set(id, resolve);
-                    worker.postMessage({ type: 'fetch', id, method: 'GET', path: url, body: null });
+                    worker.postMessage({ type: 'fetch', id, method: 'GET', path: pollUrl, body: null });
                 });
                 const parsed = JSON.parse(responseJson);
-                let lines = [];
-                try { lines = JSON.parse(parsed.body || '[]'); } catch { lines = []; }
-                if (!Array.isArray(lines)) lines = [];
+                let data;
+                try { data = JSON.parse(parsed.body || '{}'); } catch { data = {}; }
 
-                fake.readyState = 1; // OPEN
-                if (fake.onopen) fake.onopen(new Event('open'));
+                if (fake.readyState === 0) {
+                    fake.readyState = 1;
+                    if (fake.onopen) fake.onopen(new Event('open'));
+                }
 
+                const lines = data.lines || (Array.isArray(data) ? data : []);
                 for (let i = 0; i < lines.length; i++) {
                     if (fake.readyState === 2) break;
-                    await new Promise(r => setTimeout(r, 60));
                     const evt = new MessageEvent('message', { data: JSON.stringify(lines[i]) });
                     if (fake.onmessage) fake.onmessage(evt);
                     try { fake.dispatchEvent(evt); } catch {}
                 }
+                if (data.total != null) offset = data.total;
+                else offset += lines.length;
             } catch (e) {
-                if (__DEV__) console.warn('🧬 EventSource stub error:', e);
-                if (fake.onerror) fake.onerror(new Event('error'));
+                if (__DEV__) console.warn('🧬 EventSource poll error:', e);
             }
-        })();
+        };
+
+        // Start polling
+        setTimeout(doPoll, 100);
+        _pollTimer = setInterval(doPoll, 1500);
 
         return fake;
     }
