@@ -143,16 +143,14 @@ window.CephaClient = {
     connected: false,
     async discover(urls) {
         const origin = location.origin;
+        const h = location.hostname;
+        // Same-origin first, then HTTP for known dev ports (avoids SSL errors)
         const candidates = urls || [
             origin,
-            `${location.protocol}//${location.hostname}:5200`,
-            `${location.protocol}//${location.hostname}:5137`,
-            `${location.protocol}//${location.hostname}:3000`,
-            'http://localhost:5200',
-            'http://localhost:5137',
-            'http://localhost:3000'
+            `http://${h}:5200`,
+            `http://${h}:5137`,
+            `http://${h}:3000`
         ];
-        // Deduplicate
         const unique = [...new Set(candidates)];
         for (const url of unique) {
             try {
