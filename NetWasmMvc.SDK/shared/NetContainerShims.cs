@@ -258,9 +258,39 @@ namespace NetContainer.Ref.Orchestrator
                 HttpPort = NextPort(),
                 SerialPort = NextPort()
             };
-            guest.AppendLog($"[boot] Guest {id} started (browser-wasm runtime)");
-            guest.AppendLog($"[boot] Distribution: {options.TenantId ?? "default"}");
-            guest.AppendLog($"[boot] Ports — VNC:{guest.VncPort} SSH:{guest.SshPort} HTTP:{guest.HttpPort}");
+
+            // Realistic OpenWrt boot log sequence
+            guest.AppendLog($"[    0.000000] Linux version 6.6.67 (builder@buildhost) (gcc 13.3.0) #0 SMP x86_64");
+            guest.AppendLog($"[    0.000000] Command line: root=/dev/sda console=ttyS0");
+            guest.AppendLog($"[    0.010000] BIOS-provided physical RAM map:");
+            guest.AppendLog($"[    0.010000]  BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff] usable");
+            guest.AppendLog($"[    0.020000] x86/fpu: x87 FPU on board");
+            guest.AppendLog($"[    0.030000] Initializing cgroup subsys cpuset");
+            guest.AppendLog($"[    0.100000] Calibrating delay loop... 4800.00 BogoMIPS (lpj=2400000)");
+            guest.AppendLog($"[    0.200000] Memory: 2048MB available");
+            guest.AppendLog($"[    0.300000] PCI: Using configuration type 1 for base access");
+            guest.AppendLog($"[    0.400000] e1000: Intel(R) PRO/1000 Network Driver");
+            guest.AppendLog($"[    0.500000] e1000 0000:00:03.0: eth0: (PCI:33MHz:32-bit) MAC: 52:54:00:12:34:56");
+            guest.AppendLog($"[    0.600000] EXT4-fs (sda): mounted filesystem with ordered data mode");
+            guest.AppendLog($"[    0.700000] init: Console is alive");
+            guest.AppendLog($"[    0.800000] init: - watchdog -");
+            guest.AppendLog($"[    1.000000] procd: - early -");
+            guest.AppendLog($"[    1.100000] procd: - ubus -");
+            guest.AppendLog($"[    1.200000] procd: - init -");
+            guest.AppendLog($"[    1.500000] procd: Started /etc/rc.d/S10boot");
+            guest.AppendLog($"[    1.600000] procd: Started /etc/rc.d/S11sysctl");
+            guest.AppendLog($"[    2.000000] procd: Started /etc/rc.d/S19firewall");
+            guest.AppendLog($"[    2.100000] procd: Started /etc/rc.d/S20network");
+            guest.AppendLog($"[    2.200000] br-lan: port 1(eth0) entered forwarding state");
+            guest.AppendLog($"[    2.500000] procd: Started /etc/rc.d/S50uhttpd");
+            guest.AppendLog($"[    2.600000] procd: Started /etc/rc.d/S50dropbear");
+            guest.AppendLog($"[    2.800000] procd: Started /etc/rc.d/S95done");
+            guest.AppendLog($"[    3.000000] procd: - init complete -");
+            guest.AppendLog($"");
+            guest.AppendLog($"=== NetContainer.Ref (browser-wasm) ===");
+            guest.AppendLog($"Guest {id} — runtime: dotnet.js / browser-wasm");
+            guest.AppendLog($"Ports — SSH:{guest.SshPort} HTTP:{guest.HttpPort} VNC:{guest.VncPort}");
+
             _guests[id] = guest;
             return Task.FromResult<Guest.IGuestContext>(guest);
         }
