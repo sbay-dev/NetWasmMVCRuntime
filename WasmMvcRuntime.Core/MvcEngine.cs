@@ -167,11 +167,22 @@ public class MvcEngine : IMvcEngine
         {
             var path = context.Path.ToLowerInvariant().TrimEnd('/');
             
-            // Remove query strings if any
+            // Remove query strings if any, but preserve them for parameter binding
+            Dictionary<string, string> queryParams = new(StringComparer.OrdinalIgnoreCase);
             var queryIndex = path.IndexOf('?');
             if (queryIndex >= 0)
             {
+                var qs = path.Substring(queryIndex + 1);
                 path = path.Substring(0, queryIndex);
+                foreach (var part in qs.Split('&', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var eq = part.IndexOf('=');
+                    if (eq > 0)
+                        queryParams[Uri.UnescapeDataString(part.Substring(0, eq))] =
+                            Uri.UnescapeDataString(part.Substring(eq + 1));
+                    else
+                        queryParams[Uri.UnescapeDataString(part)] = "";
+                }
             }
 
             if (string.IsNullOrEmpty(path)) path = "/";
@@ -253,6 +264,10 @@ public class MvcEngine : IMvcEngine
                     else if (context.FormData.TryGetValue(p.Name ?? "", out var fv))
                     {
                         args[i] = Convert.ChangeType(fv, p.ParameterType);
+                    }
+                    else if (queryParams.TryGetValue(p.Name ?? "", out var qv))
+                    {
+                        args[i] = Convert.ChangeType(qv, p.ParameterType);
                     }
                     else
                     {
