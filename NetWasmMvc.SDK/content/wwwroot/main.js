@@ -145,8 +145,10 @@ window.CephaClient = {
         const origin = location.origin;
         const candidates = urls || [
             origin,
+            `${location.protocol}//${location.hostname}:5200`,
             `${location.protocol}//${location.hostname}:5137`,
             `${location.protocol}//${location.hostname}:3000`,
+            'http://localhost:5200',
             'http://localhost:5137',
             'http://localhost:3000'
         ];
@@ -159,10 +161,14 @@ window.CephaClient = {
                     mode: url === origin ? 'same-origin' : 'cors'
                 });
                 if (res.ok) {
+                    const ct = res.headers.get('content-type') || '';
+                    if (!ct.includes('json')) continue;
+                    const info = await res.json();
+                    if (!info || !info.name) continue;
                     this.serverUrl = url;
                     this.connected = true;
                     if (__DEV__) console.log(`%c🧬 CephaKit server: ${url}`, 'color: #28a745; font-weight: bold');
-                    return await res.json();
+                    return info;
                 }
             } catch { /* next */ }
         }
